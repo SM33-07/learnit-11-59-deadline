@@ -87,6 +87,7 @@ export function generateVisualPuzzle(difficulty: 'easy' | 'medium' | 'hard', tas
         targetWidgetId: `${widgetId}_${safeColor}`,
         expectedValue: true,
         assignedChannel,
+        widgets,
         status: 'ACTIVE',
         directive: {
           shoutText: `📢 SHOUT: "FLIP THE ${COLOR_NAMES[safeColor]} SWITCH!"`,
@@ -138,6 +139,7 @@ export function generateVisualPuzzle(difficulty: 'easy' | 'medium' | 'hard', tas
         targetWidgetId: widgetId,
         expectedValue: targetDial,
         assignedChannel,
+        widgets,
         status: 'ACTIVE',
         directive: {
           shoutText: `📢 SHOUT: "TURN DIAL TO ${targetDial}!"`,
@@ -207,6 +209,7 @@ export function generateVisualPuzzle(difficulty: 'easy' | 'medium' | 'hard', tas
         targetWidgetId: `${widgetId}_safe`,
         expectedValue: true,
         assignedChannel,
+        widgets,
         status: 'ACTIVE',
         directive: {
           shoutText: `📢 SHOUT: "PRESS THE ${SHAPE_NAMES[safeShape]} BUTTON!"`,
@@ -258,6 +261,7 @@ export function generateVisualPuzzle(difficulty: 'easy' | 'medium' | 'hard', tas
         targetWidgetId: widgetId,
         expectedValue: safeLevel,
         assignedChannel,
+        widgets,
         status: 'ACTIVE',
         directive: {
           shoutText: `📢 SHOUT: "SLIDE POWER TO LEVEL ${safeLevel}!"`,
@@ -311,6 +315,7 @@ export function generateVisualPuzzle(difficulty: 'easy' | 'medium' | 'hard', tas
         targetWidgetId: widgetId,
         expectedValue: targetPercent,
         assignedChannel,
+        widgets,
         status: 'ACTIVE',
         directive: {
           shoutText: `📢 SHOUT: "HOLD ${COLOR_NAMES[safeColor]} LEVER FOR 2 SECONDS!"`,
@@ -342,8 +347,8 @@ export function generateVisualPuzzle(difficulty: 'easy' | 'medium' | 'hard', tas
 /**
  * Creates the Synchronized Co-op Crisis Event for Phase 3 (45–65s)
  */
-export function generateCrisisEvent(playerCount: number): CrisisEvent {
-  const count = Math.min(3, Math.max(2, playerCount));
+export function generateCrisisEvent(playerIds: string[]): CrisisEvent {
+  const count = Math.min(3, Math.max(2, playerIds.length));
   return {
     id: `crisis_${Date.now()}`,
     title: '🚨 CAMPUS WI-FI MELTDOWN 🚨',
@@ -351,6 +356,7 @@ export function generateCrisisEvent(playerCount: number): CrisisEvent {
     type: 'SYNC_HOLD',
     requiredHoldMs: 3000,
     activePlayersNeeded: count,
+    requiredPlayerIds: playerIds,
     playersHolding: [],
     holdStartedAt: null,
     startedAt: Date.now(),

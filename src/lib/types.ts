@@ -76,6 +76,7 @@ export interface ActiveTask {
   directive: TaskDirective;
   blueprint: TaskBlueprint;
   assignedChannel: 'BLUEPRINTS' | 'DIRECTIVES';
+  widgets: ControlWidget[]; // Associative widgets for this task
   hint?: string;
   hintRevealed?: boolean;
   createdAt: number;
@@ -91,6 +92,7 @@ export interface CrisisEvent {
   type: 'SYNC_HOLD' | 'COLOR_CHORD';
   requiredHoldMs: number;
   activePlayersNeeded: number;
+  requiredPlayerIds: string[];
   playersHolding: string[];
   holdStartedAt: number | null; // Exact timestamp when required set started holding
   startedAt: number;
@@ -140,6 +142,7 @@ export interface SanitizedCrisis {
   instruction: string;
   requiredHoldMs: number;
   activePlayersNeeded: number;
+  requiredPlayerIds: string[];
   playersHolding: string[];
   holdProgressPercent: number; // 0 to 100%
   resolved: boolean;
@@ -169,7 +172,8 @@ export interface PlayerRoomView {
 }
 
 export interface PlayerActionPayload {
-  sessionToken: string;
+  sessionToken?: string;
+  hostToken?: string;
   playerId: string;
   type: 'CONTROL_CHANGE' | 'CRISIS_HOLD_START' | 'CRISIS_HOLD_END' | 'REQUEST_HINT' | 'HEARTBEAT';
   actionId?: string;
@@ -189,6 +193,7 @@ export interface SpectatorLog {
 export interface GameRoom {
   code: string;
   hostId: string;
+  hostToken: string; // Secret authentication token for host operations
   mode: '2_PLAYER' | '3_PLAYER';
   phase: GamePhase;
   startTime: number | null;

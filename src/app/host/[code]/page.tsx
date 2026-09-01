@@ -7,7 +7,7 @@ import { QRCodeCard } from '@/components/QRCodeCard';
 import { HostSpectatorHUD } from '@/components/HostSpectatorHUD';
 import { AudioController } from '@/components/AudioSynthesizer';
 import { AdminDrawer } from '@/components/AdminDrawer';
-import { Users, Play, ShieldCheck, Flame, Smartphone, Radio, Sparkles, AlertCircle, Home, RefreshCw } from 'lucide-react';
+import { Users, Play, ShieldCheck, Flame, Smartphone, Sparkles, Home } from 'lucide-react';
 
 export default function HostScreen({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -15,9 +15,10 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
 
   const [room, setRoom] = useState<GameRoom | null>(null);
   const [lanIp, setLanIp] = useState<string>('localhost');
+  const [hostToken, setHostToken] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
 
-  // Fetch LAN IP for QR resolution
+  // Fetch LAN IP & Host Token
   useEffect(() => {
     fetch('/api/room')
       .then((res) => res.json())
@@ -25,54 +26,47 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
         if (data.lanIp) setLanIp(data.lanIp);
       })
       .catch(() => {});
-  }, []);
+
+    const storedToken = typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : null;
+    if (storedToken) setHostToken(storedToken);
+  }, [upperCode]);
 
   // Connect to real-time Server-Sent Events stream
   useEffect(() => {
-    const eventSource = new EventSource(`/api/room/${upperCode}/stream`);
+    const tokenQuery = hostToken ? `&hostToken=${hostToken}` : '';
+    const eventSource = new EventSource(`/api/room/${upperCode}/stream?playerId=host${tokenQuery}`);
 
     eventSource.onmessage = (event) => {
       try {
         const updatedRoom = JSON.parse(event.data) as GameRoom;
         setRoom(updatedRoom);
+        if (updatedRoom.hostToken) {
+          setHostToken(updatedRoom.hostToken);
+          localStorage.setItem(`panic_host_token_${upperCode}`, updatedRoom.hostToken);
+        }
       } catch (err) {
         console.error('Error parsing SSE room state:', err);
       }
     };
 
-    eventSource.onerror = () => {
-      // Reconnect handled automatically by EventSource
-    };
-
     return () => {
       eventSource.close();
     };
-  }, [upperCode]);
+  }, [upperCode, hostToken]);
 
   const handleStartGame = async () => {
     setIsStarting(true);
     try {
+      const token = hostToken || (typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : null);
       await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'START', code: upperCode }),
+        body: JSON.stringify({ action: 'START', code: upperCode, hostToken: token }),
       });
     } catch (err) {
       console.error('Error starting game:', err);
     } finally {
       setIsStarting(false);
-    }
-  };
-
-  const handleProceed = async () => {
-    try {
-      await fetch('/api/room', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'PROCEED', code: upperCode }),
-      });
-    } catch (err) {
-      console.error('Error proceeding to game:', err);
     }
   };
 
@@ -87,13 +81,10 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
       });
       const data = await res.json();
       if (data.code) {
+        if (data.hostToken) {
+          localStorage.setItem(`panic_host_token_${data.code}`, data.hostToken);
+        }
         router.push(`/host/${data.code}`);
-      } else {
-        await fetch(`/api/room/${upperCode}/admin`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command: 'RESET' }),
-        });
       }
     } catch (err) {
       console.error('Error creating next round:', err);
@@ -102,7 +93,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
 
   if (!room) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#06080d] font-mono text-amber-400">
+      <div className="min-h-screen flex items-center justify-center bg-[#06080d] font-mono text-amber-400 select-none">
         <div className="flex flex-col items-center gap-4">
           <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin glow-yellow" />
           <span className="text-sm font-black tracking-widest uppercase">INITIALIZING MISSION CONTROL [{upperCode}]...</span>
@@ -114,11 +105,10 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
   const playersList = Object.values(room.players);
   const totalJoined = playersList.length;
   const isLobby = room.phase === 'LOBBY';
-  const isBriefing = room.phase === 'BRIEFING';
 
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-[#06080d] text-slate-100 p-4 sm:p-6 relative overflow-x-hidden selection:bg-amber-500 selection:text-black">
-      {/* Top Ambient Glow Radiance */}
+    <div className="min-h-screen flex flex-col justify-between bg-[#06080d] text-slate-100 p-4 sm:p-6 relative overflow-x-hidden selection:bg-amber-500 selection:text-black select-none">
+      {/* Top Ambient Glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-amber-500/10 blur-[100px] pointer-events-none" />
 
       {/* TOP COMMAND BAR */}
@@ -150,7 +140,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
             verdict={room.verdict}
             isHost={true}
           />
-          <AdminDrawer roomCode={upperCode} onCommandTriggered={() => {}} />
+          <AdminDrawer roomCode={upperCode} hostToken={hostToken || undefined} onCommandTriggered={() => {}} />
         </div>
       </header>
 
@@ -158,7 +148,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
       <main className="flex-1 flex flex-col items-center justify-center my-6 z-10">
         {isLobby ? (
           // -------------------------------------------------------------
-          // LOBBY VIEW: DYNAMIC QR CODE + 3 NEON PLAYER PODS
+          // LOBBY VIEW: HIGH-THROUGHPUT STALL SCANNER & PODS
           // -------------------------------------------------------------
           <div className="max-w-5xl w-full flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-12 animate-in fade-in zoom-in-95 duration-200">
             {/* Left: Dynamic QR Code Scanner Card */}
@@ -173,7 +163,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
                 <div className="flex items-center gap-2.5">
                   <Users className="w-5 h-5 text-amber-400" />
                   <span className="font-mono text-xs sm:text-sm uppercase tracking-widest text-slate-200 font-black">
-                    CREW SLOTS ({totalJoined}/3)
+                    SQUAD SLOTS ({totalJoined}/3)
                   </span>
                 </div>
                 {totalJoined >= 2 ? (
@@ -256,7 +246,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
                 </div>
               </div>
 
-              {/* Start Button / Stall Prompt */}
+              {/* Start Button */}
               <div className="mt-2">
                 {totalJoined >= 2 ? (
                   <button
@@ -266,7 +256,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
                   >
                     <Play className="w-6 h-6 fill-black" />
                     <span>
-                      {totalJoined === 2 ? '⚡ LAUNCH 2-PLAYER PANIC (75s)' : '⚡ LAUNCH 3-PLAYER PANIC (75s)'}
+                      {totalJoined === 2 ? '⚡ LAUNCH 2-PLAYER PANIC (90s)' : '⚡ LAUNCH 3-PLAYER PANIC (90s)'}
                     </span>
                   </button>
                 ) : (

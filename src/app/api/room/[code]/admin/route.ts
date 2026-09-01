@@ -5,9 +5,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cod
   try {
     const { code } = await params;
     const body = await req.json();
-    const { command } = body;
+    const { command, hostToken } = body;
 
-    const updatedRoom = handleAdminCommand(code, command);
+    const updatedRoom = handleAdminCommand(code, command, hostToken);
     if (!updatedRoom) {
       return NextResponse.json({ success: false, error: 'Room not found' }, { status: 404 });
     }

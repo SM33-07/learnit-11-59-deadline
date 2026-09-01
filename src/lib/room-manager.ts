@@ -49,9 +49,11 @@ export function generateUniqueRoomCode(): string {
 export function getOrCreateRoom(code: string, hostId: string = 'host', lanUrl?: string): GameRoom {
   const upperCode = code.toUpperCase();
   if (!globalRooms[upperCode]) {
+    const hostToken = `ht_${Math.random().toString(36).substring(2, 14)}_${Date.now()}`;
     globalRooms[upperCode] = {
       code: upperCode,
       hostId,
+      hostToken,
       mode: '3_PLAYER',
       phase: 'LOBBY',
       startTime: null,
@@ -100,7 +102,7 @@ export function getPlayerProjection(room: GameRoom, playerId: string): PlayerRoo
   const is2Player = room.mode === '2_PLAYER';
   const primaryTask = room.activeTasks.find((t) => !t.completed);
 
-  // Derive active sub-role for Player 2 in 2P mode deterministically
+  // Derive active sub-role for Player 2 in 2P mode deterministically from active task
   const activeSubRole: 'BLUEPRINTS' | 'DIRECTIVES' = is2Player
     ? primaryTask?.assignedChannel || 'BLUEPRINTS'
     : player.role === 'BLUEPRINTS'
@@ -120,6 +122,7 @@ export function getPlayerProjection(room: GameRoom, playerId: string): PlayerRoo
       instruction: room.activeCrisis.instruction,
       requiredHoldMs: room.activeCrisis.requiredHoldMs,
       activePlayersNeeded: room.activeCrisis.activePlayersNeeded,
+      requiredPlayerIds: room.activeCrisis.requiredPlayerIds,
       playersHolding: room.activeCrisis.playersHolding,
       holdProgressPercent,
       resolved: room.activeCrisis.resolved,
@@ -148,7 +151,9 @@ export function getPlayerProjection(room: GameRoom, playerId: string): PlayerRoo
 
   // 1. Controls Role Projection (Only interactive widgets, NO targetValue, NO expectedValue)
   if (player.role === 'CONTROLS') {
-    view.controlWidgets = room.controlWidgets.map((w): SanitizedWidget => ({
+    // Derive from all active tasks
+    const allWidgets = room.activeTasks.filter((t) => !t.completed).flatMap((t) => t.widgets || []);
+    view.controlWidgets = (allWidgets.length > 0 ? allWidgets : room.controlWidgets).map((w): SanitizedWidget => ({
       id: w.id,
       type: w.type,
       label: w.label,
@@ -332,10 +337,15 @@ export function joinPlayer(code: string, playerId: string, name: string): { play
 // GAMEPLAY LAUNCH & TIMELINE TICKER
 // -------------------------------------------------------------
 
-export function startGame(code: string) {
+export function startGame(code: string, hostToken?: string) {
   const upperCode = code.toUpperCase();
   const room = getRoom(upperCode);
   if (!room || (room.phase !== 'LOBBY' && room.phase !== 'BRIEFING')) return;
+
+  // Verify hostToken if provided
+  if (hostToken && room.hostToken && hostToken !== room.hostToken) {
+    throw new Error('Unauthorized host credential.');
+  }
 
   const activeCount = Math.min(3, Math.max(2, Object.values(room.players).filter((p) => p.isConnected).length));
   if (activeCount < 2) return;
@@ -353,7 +363,7 @@ export function startGame(code: string) {
   room.spectatorHeadline = '11:58:30 — 90 SECONDS TO MIDNIGHT! SUBMIT THE PROJECT!';
   addSpectatorLog(room, '🔥 DEADLINE CLOCK ACTIVE! 90 SECONDS TO 11:59:59!', 'danger');
 
-  // Populate initial task
+  // Populate initial task (strict 1 task for 2P and Orient)
   replenishTasks(room, 'easy', 1);
 
   // Start server-authoritative tick loop
@@ -361,20 +371,23 @@ export function startGame(code: string) {
   broadcastRoomUpdate(upperCode);
 }
 
-export function proceedToGame(code: string) {
-  startGame(code);
+export function proceedToGame(code: string, hostToken?: string) {
+  startGame(code, hostToken);
 }
 
 function replenishTasks(room: GameRoom, difficulty: 'easy' | 'medium' | 'hard', targetCount: number) {
   room.activeTasks = room.activeTasks.filter((t) => !t.completed);
 
-  while (room.activeTasks.length < targetCount) {
+  // Hard rule for 2-Player mode: strictly 1 active task at a time to prevent role ambiguity
+  const effectiveTarget = room.mode === '2_PLAYER' ? 1 : targetCount;
+
+  while (room.activeTasks.length < effectiveTarget) {
     const puzzle = generateVisualPuzzle(difficulty, room.activeTasks.length);
     room.activeTasks.push(puzzle.task);
-
-    // Keep active widgets clean & aligned
-    room.controlWidgets = puzzle.widgets;
   }
+
+  // Derive active widgets from all currently active tasks
+  room.controlWidgets = room.activeTasks.filter((t) => !t.completed).flatMap((t) => t.widgets || []);
 }
 
 export function startRoomTicker(code: string) {
@@ -395,11 +408,15 @@ export function startRoomTicker(code: string) {
     const elapsed = now - (room.startTime || now);
     room.elapsedMs = elapsed;
 
-    // 1. Connection Heartbeat Monitor (disconnect after 8s silence)
+    // 1. Connection Heartbeat Monitor & Crisis Holder Cleanup
     Object.values(room.players).forEach((p) => {
       if (p.isConnected && now - p.lastSeen > 8000) {
         p.isConnected = false;
         addSpectatorLog(room, `⚠️ ${p.name} disconnected!`, 'warning');
+        if (room.activeCrisis) {
+          room.activeCrisis.playersHolding = room.activeCrisis.playersHolding.filter((id) => id !== p.id);
+          room.activeCrisis.holdStartedAt = null; // Reset hold if disconnected holder was active
+        }
       }
     });
 
@@ -417,12 +434,12 @@ export function startRoomTicker(code: string) {
       addSpectatorLog(room, `⚡ ${schedule.label}: ${schedule.subtext}`, 'warning');
 
       if (room.phase === 'CRISIS' && !room.activeCrisis) {
-        const activeCount = Object.values(room.players).filter((p) => p.isConnected).length;
-        room.activeCrisis = generateCrisisEvent(activeCount);
+        const activeIds = Object.values(room.players).filter((p) => p.isConnected).map((p) => p.id);
+        room.activeCrisis = generateCrisisEvent(activeIds);
       }
     }
 
-    // 4. Real Task Expiration Check (500ms server enforcement)
+    // 4. Real Task Expiration Check (Server-authoritative expiry)
     let tasksChanged = false;
     for (const task of room.activeTasks) {
       if (!task.completed && now >= task.createdAt + task.durationMs) {
@@ -441,13 +458,13 @@ export function startRoomTicker(code: string) {
       replenishTasks(room, schedule.difficulty, schedule.targetActiveTasks);
     }
 
-    // 5. Exact Simultaneous Crisis Hold Evaluation (3.0s Continuous Set)
+    // 5. Exact Simultaneous Crisis Hold Evaluation (Exact Required Player Set)
     if (room.activeCrisis && !room.activeCrisis.resolved) {
       const crisis = room.activeCrisis;
-      const holders = crisis.playersHolding;
-      const needed = crisis.activePlayersNeeded;
+      const required = crisis.requiredPlayerIds;
+      const allRequiredHolding = required.length > 0 && required.every((id) => crisis.playersHolding.includes(id));
 
-      if (holders.length >= needed) {
+      if (allRequiredHolding) {
         if (!crisis.holdStartedAt) {
           crisis.holdStartedAt = now;
         } else if (now - crisis.holdStartedAt >= crisis.requiredHoldMs) {
@@ -497,7 +514,7 @@ export function handlePlayerAction(
     return { success: false, message: 'Unrecognized player ID.', error: 'Player not found' };
   }
 
-  // Verify Session Token (if provided)
+  // Verify Session Token
   if (payload.sessionToken && player.sessionToken && payload.sessionToken !== player.sessionToken) {
     return { success: false, message: 'Invalid session token.', error: 'Unauthorized session' };
   }
@@ -538,7 +555,9 @@ export function handlePlayerAction(
       if (!room.activeCrisis.playersHolding.includes(playerId)) {
         room.activeCrisis.playersHolding.push(playerId);
         // Reset hold timer since set changed
-        room.activeCrisis.holdStartedAt = room.activeCrisis.playersHolding.length >= room.activeCrisis.activePlayersNeeded ? Date.now() : null;
+        const required = room.activeCrisis.requiredPlayerIds;
+        const allHolding = required.length > 0 && required.every((id) => room.activeCrisis!.playersHolding.includes(id));
+        room.activeCrisis.holdStartedAt = allHolding ? Date.now() : null;
       }
       broadcastRoomUpdate(upperCode);
       return { success: true, message: 'Holding emergency sync...' };
@@ -556,14 +575,14 @@ export function handlePlayerAction(
 
   // 4. Control Widget Interactions (Strict Role Authorization)
   if (payload.type === 'CONTROL_CHANGE' && payload.widgetId) {
-    const is2Player = room.mode === '2_PLAYER';
     // Strict Authorization: Only Controls role (or 2P player 1) may touch hardware
     if (player.role !== 'CONTROLS') {
       return { success: false, message: 'Unauthorized role action. Only Controls player can operate switches.', error: 'Unauthorized role' };
     }
 
     const { widgetId, value } = payload;
-    const widget = room.controlWidgets.find((w) => w.id === widgetId);
+    const allWidgets = room.activeTasks.filter((t) => !t.completed).flatMap((t) => t.widgets || []);
+    const widget = (allWidgets.length > 0 ? allWidgets : room.controlWidgets).find((w) => w.id === widgetId);
     if (widget) {
       widget.currentValue = value;
     }
@@ -657,10 +676,14 @@ export function finalizeGame(room: GameRoom, isVictory: boolean) {
   broadcastRoomUpdate(room.code);
 }
 
-export function handleAdminCommand(code: string, command: string): GameRoom | null {
+export function handleAdminCommand(code: string, command: string, hostToken?: string): GameRoom | null {
   const upperCode = code.toUpperCase();
   const room = getRoom(upperCode);
   if (!room) return null;
+
+  if (hostToken && room.hostToken && hostToken !== room.hostToken) {
+    throw new Error('Unauthorized host credential.');
+  }
 
   if (command === 'RESET') {
     return resetRoom(upperCode);
@@ -677,9 +700,9 @@ export function handleAdminCommand(code: string, command: string): GameRoom | nu
   }
 
   if (command === 'TRIGGER_CRISIS') {
-    const activeCount = Object.values(room.players).filter((p) => p.isConnected).length;
+    const activeIds = Object.values(room.players).filter((p) => p.isConnected).map((p) => p.id);
     room.phase = 'CRISIS';
-    room.activeCrisis = generateCrisisEvent(activeCount);
+    room.activeCrisis = generateCrisisEvent(activeIds);
     addSpectatorLog(room, '🚨 ADMIN: Triggered emergency crisis event!', 'danger');
     broadcastRoomUpdate(upperCode);
     return room;
@@ -703,8 +726,10 @@ export function resetRoom(code: string): GameRoom {
     clearInterval(gameTickers[upperCode]);
     delete gameTickers[upperCode];
   }
+  const oldHostToken = globalRooms[upperCode]?.hostToken;
   delete globalRooms[upperCode];
   const fresh = getOrCreateRoom(upperCode);
+  if (oldHostToken) fresh.hostToken = oldHostToken;
   broadcastRoomUpdate(upperCode);
   return fresh;
 }

@@ -7,10 +7,11 @@ import Link from 'next/link';
 
 interface AdminDrawerProps {
   roomCode: string;
+  hostToken?: string;
   onCommandTriggered?: () => void;
 }
 
-export function AdminDrawer({ roomCode, onCommandTriggered }: AdminDrawerProps) {
+export function AdminDrawer({ roomCode, hostToken, onCommandTriggered }: AdminDrawerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -32,10 +33,11 @@ export function AdminDrawer({ roomCode, onCommandTriggered }: AdminDrawerProps) 
   const sendAdminCommand = async (command: string) => {
     setIsBusy(true);
     try {
+      const token = hostToken || (typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${roomCode}`) : null);
       await fetch(`/api/room/${roomCode}/admin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command }),
+        body: JSON.stringify({ command, hostToken: token }),
       });
       onCommandTriggered?.();
     } catch (err) {
@@ -104,7 +106,7 @@ export function AdminDrawer({ roomCode, onCommandTriggered }: AdminDrawerProps) 
 
           <button
             disabled={isBusy}
-            onClick={() => sendAdminCommand('FORCE_LOSE')}
+            onClick={() => sendAdminCommand('FORCE_FAIL')}
             className="flex items-center justify-center gap-2 p-3.5 bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/60 text-purple-300 rounded-2xl text-xs font-mono font-bold transition-all shadow-lg active:scale-95"
           >
             <Skull className="w-4 h-4" />

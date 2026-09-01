@@ -25,25 +25,38 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
 
   // Initialize or restore player session
   useEffect(() => {
-    const queryPid = searchParams.get('pid');
-    let pid = queryPid || localStorage.getItem('panic_player_id');
+    let queryPid: string | null = null;
+    let queryName: string | null = null;
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      queryPid = urlParams.get('pid');
+      queryName = urlParams.get('name');
+    }
+
+    let pid = queryPid;
+    if (!pid && typeof window !== 'undefined') {
+      pid = sessionStorage.getItem('panic_player_id') || localStorage.getItem('panic_player_id');
+    }
     if (!pid) {
       pid = `p_${Math.random().toString(36).substring(2, 9)}`;
-      if (!queryPid) {
-        localStorage.setItem('panic_player_id', pid);
-      }
     }
+
+    if (queryPid) {
+      sessionStorage.setItem('panic_player_id', queryPid);
+    } else if (typeof window !== 'undefined') {
+      localStorage.setItem('panic_player_id', pid);
+    }
+
     setPlayerId(pid);
 
-    const queryName = searchParams.get('name');
-    const storedName = localStorage.getItem('panic_player_name');
-    const initialName = queryName || (!queryPid ? storedName : '') || '';
+    const storedName = typeof window !== 'undefined' ? (queryPid ? '' : localStorage.getItem('panic_player_name')) : '';
+    const initialName = queryName || storedName || '';
     if (initialName) {
       setName(initialName);
       // Auto-join if name is already present
       joinGame(pid, initialName);
     }
-  }, [searchParams]);
+  }, []);
 
   // Connect to SSE stream
   useEffect(() => {

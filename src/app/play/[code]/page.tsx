@@ -58,26 +58,46 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
     }
   }, []);
 
-  // Connect to SSE stream
+  // Connect to SSE stream + Polling fallback for guaranteed multi-phone sync
   useEffect(() => {
     if (!isJoined) return;
 
-    const eventSource = new EventSource(`/api/room/${upperCode}/stream`);
-
-    eventSource.onmessage = (event) => {
-      try {
-        const updatedRoom = JSON.parse(event.data) as GameRoom;
-        setRoom(updatedRoom);
-        if (playerId && updatedRoom.players[playerId]) {
-          setMyPlayer(updatedRoom.players[playerId]);
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource(`/api/room/${upperCode}/stream`);
+      eventSource.onmessage = (event) => {
+        try {
+          const updatedRoom = JSON.parse(event.data) as GameRoom;
+          setRoom(updatedRoom);
+          if (playerId && updatedRoom.players[playerId]) {
+            setMyPlayer(updatedRoom.players[playerId]);
+          }
+        } catch (err) {
+          console.error('Error parsing SSE room:', err);
         }
-      } catch (err) {
-        console.error('Error parsing SSE room:', err);
-      }
-    };
+      };
+    } catch (err) {
+      console.error('SSE initialization error:', err);
+    }
+
+    // Fast polling fallback to guarantee 100% sync in iframes & mobile
+    const pollInterval = setInterval(() => {
+      fetch(`/api/room/${upperCode}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.room) {
+            setRoom(data.room);
+            if (playerId && data.room.players[playerId]) {
+              setMyPlayer(data.room.players[playerId]);
+            }
+          }
+        })
+        .catch(() => {});
+    }, 1000);
 
     return () => {
-      eventSource.close();
+      eventSource?.close();
+      clearInterval(pollInterval);
     };
   }, [isJoined, upperCode, playerId]);
 

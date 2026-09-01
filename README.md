@@ -7,14 +7,26 @@
 
 ## 🎮 How It Works
 
-Participants scan a dynamic QR code on their mobile phones to join a synchronized room. The host laptop displays the ticking deadline clock, upload progress bar, chaos meter, and spectator broadcast.
+Passerby students scan the high-voltage QR code displayed on the booth laptop to join the squad on their mobile phones. The laptop functions as **Mission Control** displaying the ticking deadline clock, upload progress bar, chaos meter, and live spectator feed.
 
-### 🎭 The 3 Asymmetric Roles
-- 🟡 **Player 1 — THE CONTROLS**: Tactile toggle switches, sliders, rotary dials, push buttons, and hold levers.
-- 🟣 **Player 2 — THE BLUEPRINTS**: Security schematics showing safe codes, trap warnings, and pin sequences.
-- 🔵 **Player 3 — THE DIRECTIVES**: Step-by-step action sequences to shout out loud to the crew!
+### 🎭 The 3 Asymmetric Roles (2–3 Players)
+- 🟡 **Player 1 — THE CONTROLS (Execute)**: Tactile hardware console with toggle switches, rotary dials, capacitor sliders, and emergency hold levers. Must listen closely to team shouts!
+- 🟣 **Player 2 — THE BLUEPRINTS (Decode)**: Security schematics showing safe codes, trap warnings, and pin sequences. Warns the team of safe targets vs electrified traps!
+- 🔵 **Player 3 — THE DIRECTIVES (Shout)**: Step-by-step action sequences. Must scream instructions out loud to the crew!
 
-*(In 2-player mode, roles fuse with sequential active channel switching so only 1 information channel is active at a time).*
+*(In 2-player mode, Player 2 automatically alternates between Blueprints and Directives one task at a time so only 1 information channel is active at any moment).*
+
+---
+
+## 📋 Mission Briefing & Rules Review
+
+Before the 75-second timer starts, the booth host clicks **"⚡ REVIEW RULES"** to open the on-screen **Mission Briefing**:
+1. 🔵 **1. DIRECTIVES (SHOUT!)**: Screams the steps out loud.
+2. 🟣 **2. BLUEPRINTS (DECODE!)**: Warns the squad of safe targets vs electrified traps.
+3. 🟡 **3. CONTROLS (EXECUTE!)**: Operates the switches, dials, and levers.
+4. 🚨 **4. CAMPUS CRISIS (SYNC!)**: When Wi-Fi alarms flash, all connected squad members hold down their sync buttons together for 3 seconds.
+
+When everyone understands their job, the host clicks **`[ ⚡ PROCEED TO DEADLINE (START) ]`** to kick off the countdown!
 
 ---
 
@@ -28,21 +40,36 @@ Participants scan a dynamic QR code on their mobile phones to join a synchronize
 
 ---
 
-## 🚀 Getting Started
+## ⚖️ Balanced Scoring & Combo Multipliers
+- **Upload Bar**: Starts at `0%`, capped at `100%`.
+- **Task Success**: `+10% UPLOAD`
+- **Crisis Success**: `+20% UPLOAD`
+- **Mistake**: `-4% UPLOAD` (Forgiving of 1–2 slip-ups)
+- **Failed Crisis**: `-8% UPLOAD`
+- **🔥 Panic Combo**: 3 consecutive successes → `COMBO x3 (+12% Boost)`; 5 consecutive → `MEGA COMBO x5 (+20% Boost)`.
+- **Victory Condition**: Instant win when hitting `100%` upload before `11:59:59` with confetti fireworks and Learnit Club registration screen.
 
-### 1. Install Dependencies
-```bash
-npm install
-```
+---
 
-### 2. Run the Development Server
+## 🚀 Stall Booth Setup & Quick Start
+
+### 1. Run the Development Server
 ```bash
 npm run dev
 ```
 
-- **Host / Big Screen Display**: Open `http://localhost:3000` and click **"LAUNCH HOST SCREEN"**.
-- **Participant Phone Join**: Point phone camera at the on-screen QR code or open `http://<YOUR_LAN_IP>:3000/play/<ROOM_CODE>`.
-- **Built-in 3-Phone Simulator**: Open `http://localhost:3000/sim` to test all roles side-by-side on desktop!
+### 2. Launch Mission Control
+- Open `http://localhost:3000` (or your public deployment URL) on your stall laptop.
+- The root page **automatically initializes Mission Control** with a fresh room code and giant QR code!
+- Passerby students point their phone cameras at the QR code to join immediately.
+- Once 2 or 3 players are connected, click **"⚡ REVIEW RULES"** → **"⚡ PROCEED TO DEADLINE"** to start playing!
+
+### 3. Stall Recovery & Admin Panel
+- Press <kbd>Shift+A</kbd> or click the ⚙️ icon on the host screen to open the **Stall Admin Console**:
+  - **Reset Room**: Instant reset for the next group.
+  - **Skip Phase**: Fast-forward gameplay.
+  - **Force Win / Force Fail**: Emergency demonstration controls.
+  - **3-Phone Simulator**: Open `http://localhost:3000/sim` to test all 3 roles side-by-side on a single desktop screen!
 
 ---
 

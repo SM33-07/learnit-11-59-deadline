@@ -209,44 +209,44 @@ export function HostSpectatorHUD({ room, onRestart }: HostSpectatorHUDProps) {
         </span>
       </div>
 
-      {/* 3-PLAYER ROLE STATUS CARDS */}
+      {/* 3-PLAYER ARCADE POD CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Yellow: Controls */}
-        <div className="bg-[#18150a]/90 border-2 border-yellow-500/60 rounded-2xl p-4 shadow-lg glow-yellow">
+        <div className="bg-[#181408]/95 border-2 border-yellow-400 rounded-3xl p-5 shadow-xl glow-yellow flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
-            <span className="font-mono text-xs font-black text-yellow-400 uppercase">🟡 THE CONTROLS</span>
-            <span className="text-[10px] font-mono bg-yellow-950 px-2 py-0.5 rounded text-yellow-300 border border-yellow-700/50">
+            <span className="font-mono text-xs font-black text-yellow-300 uppercase tracking-wider">🟡 THE CONTROLS</span>
+            <span className="text-[10px] font-mono bg-yellow-950/80 px-2.5 py-0.5 rounded-full text-yellow-300 border border-yellow-500 font-bold">
               SWITCHES & DIALS
             </span>
           </div>
           <p className="text-xs text-slate-300 font-mono">
-            Has the tactile buttons. Must listen to team shouts.
+            Has the tactile hardware. Must listen closely to team shouts!
           </p>
         </div>
 
         {/* Purple: Blueprints */}
-        <div className="bg-[#160d1f]/90 border-2 border-purple-500/60 rounded-2xl p-4 shadow-lg glow-purple">
+        <div className="bg-[#160a22]/95 border-2 border-purple-400 rounded-3xl p-5 shadow-xl glow-purple flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
-            <span className="font-mono text-xs font-black text-purple-400 uppercase">🟣 THE BLUEPRINTS</span>
-            <span className="text-[10px] font-mono bg-purple-950 px-2 py-0.5 rounded text-purple-300 border border-purple-700/50">
-              SAFE VS TRAPS
+            <span className="font-mono text-xs font-black text-purple-300 uppercase tracking-wider">🟣 THE BLUEPRINTS</span>
+            <span className="text-[10px] font-mono bg-purple-950/80 px-2.5 py-0.5 rounded-full text-purple-300 border border-purple-500 font-bold">
+              TRAP & SAFE CODES
             </span>
           </div>
           <p className="text-xs text-slate-300 font-mono">
-            Has the schematics. Tells the team which buttons are safe.
+            Has the security schematics. Decodes the traps & safe targets!
           </p>
         </div>
 
         {/* Blue: Directives */}
-        <div className="bg-[#091522]/90 border-2 border-blue-500/60 rounded-2xl p-4 shadow-lg glow-blue">
+        <div className="bg-[#081524]/95 border-2 border-cyan-400 rounded-3xl p-5 shadow-xl glow-blue flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
-            <span className="font-mono text-xs font-black text-blue-400 uppercase">🔵 THE DIRECTIVES</span>
-            <span className="text-[10px] font-mono bg-blue-950 px-2 py-0.5 rounded text-blue-300 border border-blue-700/50">
-              ACTION SEQUENCE
+            <span className="font-mono text-xs font-black text-cyan-300 uppercase tracking-wider">🔵 THE DIRECTIVES</span>
+            <span className="text-[10px] font-mono bg-blue-950/80 px-2.5 py-0.5 rounded-full text-cyan-300 border border-cyan-500 font-bold">
+              SHOUT SEQUENCER
             </span>
           </div>
           <p className="text-xs text-slate-300 font-mono">
-            Has the step order. Must shout commands loudly!
+            Has the step order. Must shout instructions loudly & clearly!
           </p>
         </div>
       </div>

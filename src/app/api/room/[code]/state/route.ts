@@ -13,22 +13,22 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
     return NextResponse.json({ success: false, error: 'Room not found' }, { status: 404 });
   }
 
-  // Host access requires hostToken verification
+  // Host access: MUST provide valid hostToken
   if (!playerId || playerId === 'host') {
-    if (hostToken && room.hostToken && hostToken !== room.hostToken) {
-      return NextResponse.json({ success: false, error: 'Unauthorized host token' }, { status: 401 });
+    if (!hostToken || hostToken !== room.hostToken) {
+      return NextResponse.json({ success: false, error: 'Unauthorized: Valid hostToken is required' }, { status: 401 });
     }
     return NextResponse.json({ success: true, room });
   }
 
-  // Player access requires valid player and sessionToken
+  // Player access: MUST provide existing playerId + matching sessionToken
   const player = room.players[playerId];
   if (!player) {
     return NextResponse.json({ success: false, error: 'Player not found in room' }, { status: 404 });
   }
 
-  if (sessionToken && player.sessionToken && sessionToken !== player.sessionToken) {
-    return NextResponse.json({ success: false, error: 'Unauthorized session token' }, { status: 401 });
+  if (!sessionToken || sessionToken !== player.sessionToken) {
+    return NextResponse.json({ success: false, error: 'Unauthorized: Valid sessionToken is required' }, { status: 401 });
   }
 
   const projection = getPlayerProjection(room, playerId);

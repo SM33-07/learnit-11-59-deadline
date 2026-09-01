@@ -1,27 +1,33 @@
 import { NextRequest } from 'next/server';
-import { subscribeToRoom, getOrCreateRoom, getRoom } from '@/lib/room-manager';
+import { subscribeToRoom, getRoom } from '@/lib/room-manager';
 import { GameRoom, PlayerRoomView } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
-  const upperCode = code.toUpperCase();
+  const upperCode = (code || '').trim().toUpperCase();
   const playerId = req.nextUrl.searchParams.get('playerId') || 'host';
   const sessionToken = req.nextUrl.searchParams.get('sessionToken') || req.headers.get('x-session-token');
   const hostToken = req.nextUrl.searchParams.get('hostToken') || req.headers.get('x-host-token');
 
-  const room = getOrCreateRoom(upperCode);
+  const room = getRoom(upperCode);
+  if (!room) {
+    return new Response('Room not found', { status: 404 });
+  }
 
-  // Validate host or player credentials if provided
+  // Mandatory credential verification
   if (playerId === 'host') {
-    if (hostToken && room.hostToken && hostToken !== room.hostToken) {
-      return new Response('Unauthorized host token', { status: 401 });
+    if (!hostToken || hostToken !== room.hostToken) {
+      return new Response('Unauthorized: Valid hostToken is required', { status: 401 });
     }
   } else {
     const player = room.players[playerId];
-    if (player && sessionToken && player.sessionToken && sessionToken !== player.sessionToken) {
-      return new Response('Unauthorized session token', { status: 401 });
+    if (!player) {
+      return new Response('Player not found in room', { status: 404 });
+    }
+    if (!sessionToken || sessionToken !== player.sessionToken) {
+      return new Response('Unauthorized: Valid sessionToken is required', { status: 401 });
     }
   }
 

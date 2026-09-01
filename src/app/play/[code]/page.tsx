@@ -62,11 +62,11 @@ export default function PlayPage({ params }: PlayPageProps) {
 
   // Connect to sanitized SSE stream + Periodic state sync
   useEffect(() => {
-    if (!isJoined || !playerId) return;
+    if (!isJoined || !playerId || !sessionToken) return;
 
     let eventSource: EventSource | null = null;
     try {
-      eventSource = new EventSource(`/api/room/${upperCode}/stream?playerId=${playerId}`);
+      eventSource = new EventSource(`/api/room/${upperCode}/stream?playerId=${playerId}&sessionToken=${sessionToken}`);
       eventSource.onmessage = (event) => {
         try {
           const updatedView = JSON.parse(event.data) as PlayerRoomView;
@@ -77,7 +77,7 @@ export default function PlayPage({ params }: PlayPageProps) {
 
     // Polling fallback to sanitized endpoint
     const pollInterval = setInterval(() => {
-      fetch(`/api/room/${upperCode}/state?playerId=${playerId}`)
+      fetch(`/api/room/${upperCode}/state?playerId=${playerId}&sessionToken=${sessionToken}`)
         .then((res) => res.json())
         .then((data) => {
           if (data.view) {
@@ -89,17 +89,15 @@ export default function PlayPage({ params }: PlayPageProps) {
 
     // Heartbeat every 3s
     const heartbeatInterval = setInterval(() => {
-      if (sessionToken) {
-        fetch(`/api/room/${upperCode}/action`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'HEARTBEAT',
-            playerId,
-            sessionToken,
-          }),
-        }).catch(() => {});
-      }
+      fetch(`/api/room/${upperCode}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'HEARTBEAT',
+          playerId,
+          sessionToken,
+        }),
+      }).catch(() => {});
     }, 3000);
 
     return () => {

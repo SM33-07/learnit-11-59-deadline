@@ -10,26 +10,26 @@ async function testCrisis() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'CREATE' }),
   });
-  const { code } = await createRes.json();
+  const { code, hostToken } = await createRes.json();
 
   const p1 = (await (await fetch(`${BASE_URL}/api/room`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'JOIN', code, playerId: 'p1', name: 'P1' }) })).json()).player;
   const p2 = (await (await fetch(`${BASE_URL}/api/room`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'JOIN', code, playerId: 'p2', name: 'P2' }) })).json()).player;
   const p3 = (await (await fetch(`${BASE_URL}/api/room`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'JOIN', code, playerId: 'p3', name: 'P3' }) })).json()).player;
 
-  await fetch(`${BASE_URL}/api/room`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'START', code }) });
+  await fetch(`${BASE_URL}/api/room`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'START', code, hostToken }) });
 
   // Trigger Crisis via Admin
   await fetch(`${BASE_URL}/api/room/${code}/admin`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: 'TRIGGER_CRISIS' }),
+    body: JSON.stringify({ command: 'TRIGGER_CRISIS', hostToken }),
   });
 
   // Test 1: P1 and P2 hold, P3 doesn't -> Not all holding
   await fetch(`${BASE_URL}/api/room/${code}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'CRISIS_HOLD_START', playerId: 'p1', sessionToken: p1.sessionToken }) });
   await fetch(`${BASE_URL}/api/room/${code}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'CRISIS_HOLD_START', playerId: 'p2', sessionToken: p2.sessionToken }) });
 
-  let state = (await (await fetch(`${BASE_URL}/api/room/${code}/state?playerId=host`)).json()).room;
+  let state = (await (await fetch(`${BASE_URL}/api/room/${code}/state?playerId=host&hostToken=${hostToken}`)).json()).room;
   assert(!state.activeCrisis.resolved, 'Crisis must not resolve with only 2/3 holding');
   console.log('[PASS 1] Crisis not resolved when only 2 of 3 players hold');
 
@@ -40,7 +40,7 @@ async function testCrisis() {
   await new Promise((r) => setTimeout(r, 1000));
   await fetch(`${BASE_URL}/api/room/${code}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'CRISIS_HOLD_END', playerId: 'p3', sessionToken: p3.sessionToken }) });
 
-  state = (await (await fetch(`${BASE_URL}/api/room/${code}/state?playerId=host`)).json()).room;
+  state = (await (await fetch(`${BASE_URL}/api/room/${code}/state?playerId=host&hostToken=${hostToken}`)).json()).room;
   assert(!state.activeCrisis.resolved, 'Crisis must not resolve if released early at 1000ms');
   console.log('[PASS 2] Early release at 1000ms correctly aborted the hold without resolving');
 
@@ -49,7 +49,7 @@ async function testCrisis() {
   console.log('Holding for 3100ms continuous...');
   await new Promise((r) => setTimeout(r, 3300));
 
-  state = (await (await fetch(`${BASE_URL}/api/room/${code}/state?playerId=host`)).json()).room;
+  state = (await (await fetch(`${BASE_URL}/api/room/${code}/state?playerId=host&hostToken=${hostToken}`)).json()).room;
   assert(state.activeCrisis.resolved === true, 'Crisis MUST resolve after 3000ms continuous hold');
   assert(state.uploadPercent >= 20, 'Upload percent must increase by +20% on crisis resolution');
   console.log(`[PASS 3] Exact 3-second simultaneous hold succeeded! Upload is now ${state.uploadPercent}%`);

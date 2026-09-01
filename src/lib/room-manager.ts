@@ -1,4 +1,5 @@
 // Core Room & Game State Manager with Server-Authoritative Engine and Asymmetric Projections
+import crypto from 'node:crypto';
 import {
   GameRoom,
   Player,
@@ -49,7 +50,7 @@ export function generateUniqueRoomCode(): string {
 export function getOrCreateRoom(code: string, hostId: string = 'host', lanUrl?: string): GameRoom {
   const upperCode = code.toUpperCase();
   if (!globalRooms[upperCode]) {
-    const hostToken = `ht_${Math.random().toString(36).substring(2, 14)}_${Date.now()}`;
+    const hostToken = `ht_${crypto.randomUUID()}`;
     globalRooms[upperCode] = {
       code: upperCode,
       hostId,
@@ -151,7 +152,6 @@ export function getPlayerProjection(room: GameRoom, playerId: string): PlayerRoo
 
   // 1. Controls Role Projection (Only interactive widgets, NO targetValue, NO expectedValue)
   if (player.role === 'CONTROLS') {
-    // Derive from all active tasks
     const allWidgets = room.activeTasks.filter((t) => !t.completed).flatMap((t) => t.widgets || []);
     view.controlWidgets = (allWidgets.length > 0 ? allWidgets : room.controlWidgets).map((w): SanitizedWidget => ({
       id: w.id,
@@ -312,8 +312,8 @@ export function joinPlayer(code: string, playerId: string, name: string): { play
     color = 'blue';
   }
 
-  // Generate lightweight session token
-  const sessionToken = `st_${Math.random().toString(36).substring(2, 12)}_${Date.now()}`;
+  // Generate cryptographically strong session token
+  const sessionToken = `st_${crypto.randomUUID()}`;
 
   const newPlayer: Player = {
     id: playerId,
@@ -340,15 +340,19 @@ export function joinPlayer(code: string, playerId: string, name: string): { play
 export function startGame(code: string, hostToken?: string) {
   const upperCode = code.toUpperCase();
   const room = getRoom(upperCode);
-  if (!room || (room.phase !== 'LOBBY' && room.phase !== 'BRIEFING')) return;
+  if (!room || (room.phase !== 'LOBBY' && room.phase !== 'BRIEFING')) {
+    throw new Error('Room not found or game already in progress.');
+  }
 
-  // Verify hostToken if provided
-  if (hostToken && room.hostToken && hostToken !== room.hostToken) {
-    throw new Error('Unauthorized host credential.');
+  // Mandatory hostToken authentication
+  if (!hostToken || hostToken !== room.hostToken) {
+    throw new Error('Unauthorized: Host authentication token is required.');
   }
 
   const activeCount = Math.min(3, Math.max(2, Object.values(room.players).filter((p) => p.isConnected).length));
-  if (activeCount < 2) return;
+  if (activeCount < 2) {
+    throw new Error('At least 2 players are required to launch.');
+  }
 
   room.mode = activeCount === 2 ? '2_PLAYER' : '3_PLAYER';
   room.phase = 'ORIENT';
@@ -458,11 +462,12 @@ export function startRoomTicker(code: string) {
       replenishTasks(room, schedule.difficulty, schedule.targetActiveTasks);
     }
 
-    // 5. Exact Simultaneous Crisis Hold Evaluation (Exact Required Player Set)
+    // 5. Exact Simultaneous Crisis Hold Evaluation (Exact Required Player Set with Active Connection Check)
     if (room.activeCrisis && !room.activeCrisis.resolved) {
       const crisis = room.activeCrisis;
       const required = crisis.requiredPlayerIds;
-      const allRequiredHolding = required.length > 0 && required.every((id) => crisis.playersHolding.includes(id));
+      const allRequiredConnected = required.length > 0 && required.every((id) => room.players[id]?.isConnected);
+      const allRequiredHolding = allRequiredConnected && required.every((id) => crisis.playersHolding.includes(id));
 
       if (allRequiredHolding) {
         if (!crisis.holdStartedAt) {
@@ -514,9 +519,9 @@ export function handlePlayerAction(
     return { success: false, message: 'Unrecognized player ID.', error: 'Player not found' };
   }
 
-  // Verify Session Token
-  if (payload.sessionToken && player.sessionToken && payload.sessionToken !== player.sessionToken) {
-    return { success: false, message: 'Invalid session token.', error: 'Unauthorized session' };
+  // Mandatory Session Token Verification
+  if (!payload.sessionToken || payload.sessionToken !== player.sessionToken) {
+    return { success: false, message: 'Invalid or missing session token.', error: 'Unauthorized session' };
   }
 
   // Update heartbeat
@@ -575,7 +580,6 @@ export function handlePlayerAction(
 
   // 4. Control Widget Interactions (Strict Role Authorization)
   if (payload.type === 'CONTROL_CHANGE' && payload.widgetId) {
-    // Strict Authorization: Only Controls role (or 2P player 1) may touch hardware
     if (player.role !== 'CONTROLS') {
       return { success: false, message: 'Unauthorized role action. Only Controls player can operate switches.', error: 'Unauthorized role' };
     }
@@ -681,8 +685,9 @@ export function handleAdminCommand(code: string, command: string, hostToken?: st
   const room = getRoom(upperCode);
   if (!room) return null;
 
-  if (hostToken && room.hostToken && hostToken !== room.hostToken) {
-    throw new Error('Unauthorized host credential.');
+  // Mandatory hostToken verification
+  if (!hostToken || hostToken !== room.hostToken) {
+    throw new Error('Unauthorized: Host authentication token is required.');
   }
 
   if (command === 'RESET') {

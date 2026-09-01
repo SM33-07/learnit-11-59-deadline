@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, use } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { GameRoom, Player } from '@/lib/types';
 import { MobileControlBoard } from '@/components/MobileControlBoard';
@@ -8,7 +9,7 @@ import { MobileBlueprintCard } from '@/components/MobileBlueprintCard';
 import { MobileDirectiveCard } from '@/components/MobileDirectiveCard';
 import { CrisisOverlay } from '@/components/CrisisOverlay';
 import { formatTimeRemaining } from '@/lib/phase-manager';
-import { Sparkles, ArrowRight, ShieldAlert, CheckCircle, Clock, Volume2 } from 'lucide-react';
+import { Sparkles, ArrowRight, ShieldAlert, CheckCircle, Clock, Volume2, Home } from 'lucide-react';
 
 export default function PlayScreen({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -236,6 +237,20 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
 
           <div className="flex items-center gap-2 text-xs text-amber-400 font-bold animate-pulse">
             <span>WAITING FOR HOST TO START GAME...</span>
+          </div>
+
+          <div className="pt-2 border-t border-slate-800/80 w-full">
+            <Link
+              href="/"
+              onClick={() => {
+                localStorage.removeItem('panic_player_id');
+                localStorage.removeItem('panic_player_name');
+              }}
+              className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-amber-400 font-mono transition-colors"
+            >
+              <Home className="w-3.5 h-3.5" />
+              <span>Leave Lobby / Go Home</span>
+            </Link>
           </div>
         </div>
       </main>

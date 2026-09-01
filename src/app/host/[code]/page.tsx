@@ -7,7 +7,7 @@ import { QRCodeCard } from '@/components/QRCodeCard';
 import { HostSpectatorHUD } from '@/components/HostSpectatorHUD';
 import { AudioController } from '@/components/AudioSynthesizer';
 import { AdminDrawer } from '@/components/AdminDrawer';
-import { Users, Play, ShieldCheck, Flame, Smartphone, Radio, Sparkles, AlertCircle } from 'lucide-react';
+import { Users, Play, ShieldCheck, Flame, Smartphone, Radio, Sparkles, AlertCircle, Home, RefreshCw } from 'lucide-react';
 
 export default function HostScreen({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -134,7 +134,15 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            onClick={handleRestart}
+            title="Create Fresh Room / New Lobby"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-amber-400/60 text-slate-300 hover:text-amber-400 rounded-2xl text-xs font-mono font-bold transition-all backdrop-blur-md shadow-lg active:scale-95"
+          >
+            <Home className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">NEW LOBBY</span>
+          </button>
           <AudioController
             phase={room.phase}
             comboCount={room.comboCount}

@@ -114,6 +114,12 @@ export function AdminDrawer({ roomCode, onCommandTriggered }: AdminDrawerProps) 
 
         <div className="border-t border-slate-800 pt-3 flex flex-col gap-2">
           <Link
+            href="/"
+            className="flex items-center justify-center gap-2 w-full p-3 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-500/60 text-amber-300 rounded-2xl text-xs font-mono font-black transition-all shadow-lg glow-yellow"
+          >
+            <span>🏠 CREATE FRESH ROOM / NEW LOBBY</span>
+          </Link>
+          <Link
             href={`/sim?room=${roomCode}`}
             target="_blank"
             className="flex items-center justify-center gap-2 w-full p-3 bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/60 text-cyan-300 rounded-2xl text-xs font-mono font-black transition-all shadow-lg glow-blue"

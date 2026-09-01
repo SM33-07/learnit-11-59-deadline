@@ -8,21 +8,19 @@ export default function RootAutoHostPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Generate a fresh stall room and redirect directly to host screen
-    const defaultCode = `PANIC${Math.floor(1000 + Math.random() * 9000)}`;
-
+    // Generate a brand new unique stall room and redirect directly to host screen
     fetch('/api/room', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'CREATE', code: defaultCode }),
+      body: JSON.stringify({ action: 'CREATE' }),
     })
       .then((res) => res.json())
       .then((data) => {
-        const targetCode = data.room?.code || defaultCode;
+        const targetCode = data.code || data.room?.code || `PANIC${Math.floor(1000 + Math.random() * 9000)}`;
         router.replace(`/host/${targetCode}`);
       })
       .catch(() => {
-        router.replace(`/host/${defaultCode}`);
+        router.replace(`/host/PANIC${Math.floor(1000 + Math.random() * 9000)}`);
       });
   }, [router]);
 

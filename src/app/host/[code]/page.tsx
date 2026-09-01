@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, use } from 'react';
+import { useRouter } from 'next/navigation';
 import { GameRoom } from '@/lib/types';
 import { QRCodeCard } from '@/components/QRCodeCard';
 import { HostSpectatorHUD } from '@/components/HostSpectatorHUD';
@@ -75,15 +76,27 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
     }
   };
 
+  const router = useRouter();
+
   const handleRestart = async () => {
     try {
-      await fetch(`/api/room/${upperCode}/admin`, {
+      const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'RESET' }),
+        body: JSON.stringify({ action: 'CREATE' }),
       });
+      const data = await res.json();
+      if (data.code) {
+        router.push(`/host/${data.code}`);
+      } else {
+        await fetch(`/api/room/${upperCode}/admin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: 'RESET' }),
+        });
+      }
     } catch (err) {
-      console.error('Error resetting room:', err);
+      console.error('Error creating next round:', err);
     }
   };
 

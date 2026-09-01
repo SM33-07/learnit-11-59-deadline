@@ -31,10 +31,10 @@ export function HostSpectatorHUD({ room, onRestart }: HostSpectatorHUDProps) {
     }
   }, [room.phase, room.verdict]);
 
-  // Generate QR for LearnIT CTA at endgame
+  // Generate QR for LearnIT Google Form Membership Registration at endgame
   useEffect(() => {
     if (room.phase === 'RESOLVED' && ctaCanvasRef.current) {
-      QRCode.toCanvas(ctaCanvasRef.current, 'https://github.com/learnit-club', {
+      QRCode.toCanvas(ctaCanvasRef.current, 'https://docs.google.com/forms/d/e/1FAIpQLScdpwK6YjFtwWux8XXBr7tJRYrIlJSdsTNbfT3mahZShdCxHQ/viewform', {
         width: 140,
         margin: 2,
         color: {
@@ -52,6 +52,7 @@ export function HostSpectatorHUD({ room, onRestart }: HostSpectatorHUDProps) {
     const isVictory = room.verdict === 'VICTORY';
     const elapsedSec = (room.endTime ? room.endTime - (room.startTime || 0) : 75000) / 1000;
     const summary = getEndgameSummary(isVictory, room.uploadPercent, room.maxCombo, elapsedSec);
+    const googleFormUrl = 'https://docs.google.com/forms/d/e/1FAIpQLScdpwK6YjFtwWux8XXBr7tJRYrIlJSdsTNbfT3mahZShdCxHQ/viewform';
 
     return (
       <div className="flex flex-col items-center justify-center max-w-4xl w-full mx-auto p-6 animate-in fade-in zoom-in-95 duration-200">
@@ -107,22 +108,28 @@ export function HostSpectatorHUD({ room, onRestart }: HostSpectatorHUDProps) {
             </div>
           </div>
 
-          {/* Playful LearnIT Club CTA */}
-          <div className="bg-[#0f1424] border-2 border-cyan-500/40 rounded-2xl p-6 mb-8 max-w-2xl mx-auto flex flex-col sm:flex-row items-center gap-6 text-left glow-blue">
-            <div className="flex-shrink-0 bg-cyan-400 p-2 rounded-xl border border-cyan-300">
-              <canvas ref={ctaCanvasRef} className="rounded-lg" />
+          {/* Official LearnIT Club Membership CTA Card */}
+          <div className="bg-[#0f1424] border-2 border-cyan-500/60 rounded-3xl p-6 mb-8 max-w-2xl mx-auto flex flex-col sm:flex-row items-center gap-6 text-left glow-blue shadow-2xl">
+            <div className="flex-shrink-0 bg-cyan-400 p-2.5 rounded-2xl border-2 border-cyan-300 shadow-md">
+              <canvas ref={ctaCanvasRef} className="rounded-xl" />
             </div>
-            <div>
-              <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs uppercase tracking-widest font-bold mb-1">
-                <Sparkles className="w-4 h-4" />
-                <span>LEARNIT CLUB EXCLUSIVE</span>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs uppercase tracking-widest font-black mb-1.5">
+                <Sparkles className="w-4 h-4 text-cyan-300 animate-pulse" />
+                <span>LEARNIT CLUB MEMBERSHIP</span>
               </div>
-              <p className="text-slate-200 font-mono text-sm mb-3 italic">
-                "{summary.learnitQuote}"
+              <p className="text-white font-mono text-base font-bold mb-3 leading-snug">
+                "Join our club for more such fun experiences and cool peeps!"
               </p>
-              <span className="inline-flex items-center gap-2 font-mono text-xs font-bold text-cyan-300 uppercase tracking-wider bg-cyan-950/60 px-3 py-1.5 rounded-lg border border-cyan-500/40">
-                {summary.learnitCta}
-              </span>
+              <a
+                href={googleFormUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="tactile-btn inline-flex items-center gap-2 font-mono text-xs font-black text-black uppercase tracking-wider bg-gradient-to-r from-cyan-400 to-teal-300 hover:from-cyan-300 hover:to-teal-200 px-5 py-2.5 rounded-xl shadow-lg glow-blue transition-all"
+              >
+                <span>🚀 TAP TO REGISTER (GOOGLE FORM)</span>
+                <ArrowRight className="w-4 h-4" />
+              </a>
             </div>
           </div>
 

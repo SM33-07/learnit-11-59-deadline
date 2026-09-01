@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOrCreateRoom, joinPlayer, startGame } from '@/lib/room-manager';
+import { getOrCreateRoom, joinPlayer, startGame, generateUniqueRoomCode } from '@/lib/room-manager';
 import { getLocalLanIp } from '@/lib/network-utils';
 
 export async function POST(req: NextRequest) {
@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { action, code, playerId, name, lanUrl } = body;
 
-    const roomCode = (code || `PANIC${Math.floor(1000 + Math.random() * 9000)}`).toUpperCase();
+    const roomCode = (code && code.trim() ? code.trim() : generateUniqueRoomCode()).toUpperCase();
 
     if (action === 'CREATE') {
       const room = getOrCreateRoom(roomCode, playerId || 'host', lanUrl);
@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         room,
+        code: roomCode,
         lanIp,
         defaultPort: 3000,
       });

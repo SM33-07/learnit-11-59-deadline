@@ -296,10 +296,12 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
   // -------------------------------------------------------------
   if (room.phase === 'RESOLVED') {
     const isVictory = room.verdict === 'VICTORY';
+    const googleFormUrl = 'https://docs.google.com/forms/d/e/1FAIpQLScdpwK6YjFtwWux8XXBr7tJRYrIlJSdsTNbfT3mahZShdCxHQ/viewform';
+
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#07090e] text-slate-100 font-mono text-center scanlines">
+      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#06080d] text-slate-100 font-mono text-center relative overflow-hidden">
         <div
-          className={`max-w-md w-full rounded-3xl p-8 border-2 shadow-2xl ${
+          className={`max-w-md w-full rounded-3xl p-6 sm:p-8 border-2 shadow-2xl flex flex-col items-center ${
             isVictory ? 'bg-[#0a1f18] border-emerald-500 glow-green' : 'bg-[#1f0a10] border-rose-500 glow-red'
           }`}
         >
@@ -308,11 +310,31 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
             {isVictory ? 'SUBMISSION SUCCESSFUL!' : 'PORTAL LOCKED OUT!'}
           </h1>
           <p className="text-sm text-slate-300 mb-6">
-            {isVictory ? 'You and your crew beat the 11:59:59 deadline!' : 'Deadline missed! Check the main screen for summary.'}
+            {isVictory ? 'You and your crew beat the 11:59:59 deadline!' : 'Deadline missed! Check the main screen for squad summary.'}
           </p>
 
-          <div className="bg-black/60 rounded-xl p-4 border border-slate-700/60 text-xs text-slate-400">
-            Look up at the main booth screen for the full breakdown and Learnit Club registration!
+          {/* Official LearnIT Club Membership Box */}
+          <div className="bg-[#0b1324] border-2 border-cyan-400/80 rounded-2xl p-5 mb-4 text-left w-full glow-blue shadow-xl">
+            <div className="flex items-center gap-1.5 text-cyan-300 font-black text-xs uppercase tracking-widest mb-1">
+              <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
+              <span>LEARNIT CLUB MEMBERSHIP</span>
+            </div>
+            <p className="text-sm font-bold text-white mb-3">
+              "Join our club for more such fun experiences and cool peeps!"
+            </p>
+            <a
+              href={googleFormUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="tactile-btn w-full py-3.5 px-4 bg-gradient-to-r from-cyan-400 to-teal-300 hover:from-cyan-300 text-black font-black text-xs rounded-xl uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg glow-blue"
+            >
+              <span>🚀 TAP TO REGISTER (GOOGLE FORM)</span>
+              <ArrowRight className="w-4 h-4" />
+            </a>
+          </div>
+
+          <div className="text-[11px] text-slate-400">
+            Look up at the main booth screen for the full breakdown!
           </div>
         </div>
       </main>

@@ -87,6 +87,8 @@ export function handleCrisisFail(currentUpload: number, currentMaxCombo: number)
   };
 }
 
+export const MEMBERSHIP_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScdpwK6YjFtwWux8XXBr7tJRYrIlJSdsTNbfT3mahZShdCxHQ/viewform';
+
 export interface EndgameSummary {
   grade: 'S+' | 'A' | 'B' | 'C' | 'F-';
   title: string;
@@ -102,24 +104,24 @@ export function getEndgameSummary(isVictory: boolean, uploadPercent: number, max
         grade: 'S+',
         title: 'CERTIFIED 11:59 LEGENDS',
         subtext: `Uploaded with ${Math.round(75 - elapsedSeconds)}s to spare! Absolute neural synchronization.`,
-        learnitCta: 'MAKE SOMETHING WITH LEARNIT →',
-        learnitQuote: 'Somewhere between "this is impossible" and "wait, we actually built it" is basically LearnIT.'
+        learnitCta: 'JOIN LEARNIT CLUB →',
+        learnitQuote: 'Join our club for more such fun experiences and cool peeps!'
       };
     } else if (maxCombo >= 2) {
       return {
         grade: 'A',
         title: 'ELITE PROCRASTINATION SQUAD',
         subtext: `100% Upload achieved under extreme campus stress.`,
-        learnitCta: 'LEVEL UP YOUR CHAOS WITH LEARNIT →',
-        learnitQuote: 'You survived the deadline. Your next bad idea could be even better. Build it at LearnIT.'
+        learnitCta: 'JOIN LEARNIT CLUB →',
+        learnitQuote: 'Join our club for more such fun experiences and cool peeps!'
       };
     } else {
       return {
         grade: 'B',
         title: 'BARELY ESCAPED EXPULSION',
         subtext: `Clock was at 11:59:58, but a win is a win.`,
-        learnitCta: 'NEVER SWEAT A DEADLINE AGAIN → JOIN LEARNIT',
-        learnitQuote: 'Why panic at 11:59 PM when you can build things that actually work? Join LearnIT Club.'
+        learnitCta: 'JOIN LEARNIT CLUB →',
+        learnitQuote: 'Join our club for more such fun experiences and cool peeps!'
       };
     }
   } else {
@@ -127,8 +129,8 @@ export function getEndgameSummary(isVictory: boolean, uploadPercent: number, max
       grade: 'F-',
       title: 'SUMMARILY EXPELLED 💀',
       subtext: `Portal closed at 11:59:59 with only ${uploadPercent}% uploaded. Professor will not accept excuses.`,
-      learnitCta: 'JOIN LEARNIT TO REBUILD YOUR REPUTATION →',
-      learnitQuote: 'Next time, don’t start at 11:58 PM. Learn, build, and ship early with LearnIT Club.'
+      learnitCta: 'JOIN LEARNIT TO LEVEL UP →',
+      learnitQuote: 'Join our club for more such fun experiences and cool peeps!'
     };
   }
 }

@@ -9,6 +9,19 @@ const globalRooms: Record<string, GameRoom> = {};
 const sseSubscribers: Record<string, Set<(room: GameRoom) => void>> = {};
 const gameTickers: Record<string, NodeJS.Timeout> = {};
 
+export function generateUniqueRoomCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  do {
+    let rand = '';
+    for (let i = 0; i < 4; i++) {
+      rand += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    code = `PANIC${rand}`;
+  } while (globalRooms[code]);
+  return code;
+}
+
 export function getOrCreateRoom(code: string, hostId: string = 'host', lanUrl?: string): GameRoom {
   const upperCode = code.toUpperCase();
   if (!globalRooms[upperCode]) {

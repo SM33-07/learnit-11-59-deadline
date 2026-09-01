@@ -18,39 +18,74 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
   const [hostToken, setHostToken] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
 
-  // Fetch LAN IP & Host Token
+  // Initialize Host Room, HostToken & LAN IP
   useEffect(() => {
-    fetch('/api/room')
+    let isMounted = true;
+    const storedToken = typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : null;
+
+    // Ensure room is created / claimed and initial state is returned
+    fetch('/api/room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'CREATE', code: upperCode, hostToken: storedToken }),
+    })
       .then((res) => res.json())
       .then((data) => {
+        if (!isMounted) return;
         if (data.lanIp) setLanIp(data.lanIp);
-      })
-      .catch(() => {});
-
-    const storedToken = typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : null;
-    if (storedToken) setHostToken(storedToken);
-  }, [upperCode]);
-
-  // Connect to real-time Server-Sent Events stream
-  useEffect(() => {
-    const tokenQuery = hostToken ? `&hostToken=${hostToken}` : '';
-    const eventSource = new EventSource(`/api/room/${upperCode}/stream?playerId=host${tokenQuery}`);
-
-    eventSource.onmessage = (event) => {
-      try {
-        const updatedRoom = JSON.parse(event.data) as GameRoom;
-        setRoom(updatedRoom);
-        if (updatedRoom.hostToken) {
-          setHostToken(updatedRoom.hostToken);
-          localStorage.setItem(`panic_host_token_${upperCode}`, updatedRoom.hostToken);
+        if (data.hostToken) {
+          setHostToken(data.hostToken);
+          localStorage.setItem(`panic_host_token_${upperCode}`, data.hostToken);
         }
-      } catch (err) {
-        console.error('Error parsing SSE room state:', err);
-      }
-    };
+        if (data.room) {
+          setRoom(data.room);
+        }
+      })
+      .catch((err) => console.error('Host init error:', err));
 
     return () => {
-      eventSource.close();
+      isMounted = false;
+    };
+  }, [upperCode]);
+
+  // Connect to real-time Server-Sent Events stream + Polling fallback
+  useEffect(() => {
+    if (!hostToken) return;
+
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource(`/api/room/${upperCode}/stream?playerId=host&hostToken=${hostToken}`);
+      eventSource.onmessage = (event) => {
+        try {
+          const updatedRoom = JSON.parse(event.data) as GameRoom;
+          setRoom(updatedRoom);
+          if (updatedRoom.hostToken) {
+            setHostToken(updatedRoom.hostToken);
+            localStorage.setItem(`panic_host_token_${upperCode}`, updatedRoom.hostToken);
+          }
+        } catch (err) {
+          console.error('Error parsing SSE room state:', err);
+        }
+      };
+    } catch (err) {
+      console.error('SSE connection error:', err);
+    }
+
+    // Polling fallback to keep host synchronized
+    const pollInterval = setInterval(() => {
+      fetch(`/api/room/${upperCode}/state?playerId=host&hostToken=${hostToken}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.room) {
+            setRoom(data.room);
+          }
+        })
+        .catch(() => {});
+    }, 1000);
+
+    return () => {
+      eventSource?.close();
+      clearInterval(pollInterval);
     };
   }, [upperCode, hostToken]);
 

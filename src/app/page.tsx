@@ -17,6 +17,9 @@ export default function RootAutoHostPage() {
       .then((res) => res.json())
       .then((data) => {
         const targetCode = data.code || data.room?.code || `PANIC${Math.floor(1000 + Math.random() * 9000)}`;
+        if (data.hostToken && typeof window !== 'undefined') {
+          localStorage.setItem(`panic_host_token_${targetCode}`, data.hostToken);
+        }
         router.replace(`/host/${targetCode}`);
       })
       .catch(() => {

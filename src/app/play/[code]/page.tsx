@@ -24,16 +24,19 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
 
   // Initialize or restore player session
   useEffect(() => {
-    let pid = localStorage.getItem('panic_player_id');
+    const queryPid = searchParams.get('pid');
+    let pid = queryPid || localStorage.getItem('panic_player_id');
     if (!pid) {
       pid = `p_${Math.random().toString(36).substring(2, 9)}`;
-      localStorage.setItem('panic_player_id', pid);
+      if (!queryPid) {
+        localStorage.setItem('panic_player_id', pid);
+      }
     }
     setPlayerId(pid);
 
     const queryName = searchParams.get('name');
     const storedName = localStorage.getItem('panic_player_name');
-    const initialName = queryName || storedName || '';
+    const initialName = queryName || (!queryPid ? storedName : '') || '';
     if (initialName) {
       setName(initialName);
       // Auto-join if name is already present

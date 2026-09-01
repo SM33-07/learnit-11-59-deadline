@@ -1,10 +1,12 @@
 export const SCORE_RULES = {
-  TASK_SUCCESS_UPLOAD: 10,      // +10% on normal task (balanced path)
+  TASK_SUCCESS_UPLOAD: 10,      // +10% on normal task
   CRISIS_SUCCESS_UPLOAD: 20,    // +20% on team boss event
-  MISTAKE_PENALTY_UPLOAD: 4,    // -4% on wrong control press (forgiving of 1-2 mistakes)
-  CRISIS_FAIL_PENALTY: 8,       // -8% on missed crisis
-  COMBO_3_BOOST: 12,            // +12% bonus when hitting 3x combo
-  COMBO_5_BOOST: 20,            // +20% bonus when hitting 5x mega combo
+  MISTAKE_PENALTY_UPLOAD: 5,    // -5% on wrong control press
+  TIMEOUT_PENALTY_UPLOAD: 5,    // -5% on task expiration
+  HINT_PENALTY_UPLOAD: 3,       // -3% on hint reveal
+  CRISIS_FAIL_PENALTY: 10,      // -10% on missed crisis
+  COMBO_3_BOOST: 10,            // +10% bonus when hitting 3x combo
+  COMBO_5_BOOST: 15,            // +15% bonus when hitting 5x mega combo
 };
 
 export function clampUpload(val: number): number {
@@ -60,6 +62,19 @@ export function handleMistake(currentUpload: number, currentMaxCombo: number): S
   };
 }
 
+export function handleTaskTimeout(currentUpload: number, currentMaxCombo: number): ScoreUpdateResult {
+  const delta = -SCORE_RULES.TIMEOUT_PENALTY_UPLOAD;
+  const newUpload = clampUpload(currentUpload + delta);
+  return {
+    newUpload,
+    newCombo: 0,
+    newMaxCombo: currentMaxCombo,
+    isVictory: false,
+    delta,
+    message: `⏳ TASK EXPIRED! -${SCORE_RULES.TIMEOUT_PENALTY_UPLOAD}% (Combo Broken)`
+  };
+}
+
 export function handleCrisisSuccess(currentUpload: number, currentCombo: number, currentMaxCombo: number): ScoreUpdateResult {
   const delta = SCORE_RULES.CRISIS_SUCCESS_UPLOAD;
   const newUpload = clampUpload(currentUpload + delta);
@@ -99,11 +114,11 @@ export interface EndgameSummary {
 
 export function getEndgameSummary(isVictory: boolean, uploadPercent: number, maxCombo: number, elapsedSeconds: number): EndgameSummary {
   if (isVictory) {
-    if (elapsedSeconds <= 45 && maxCombo >= 4) {
+    if (elapsedSeconds <= 55 && maxCombo >= 4) {
       return {
         grade: 'S+',
         title: 'CERTIFIED 11:59 LEGENDS',
-        subtext: `Uploaded with ${Math.round(75 - elapsedSeconds)}s to spare! Absolute neural synchronization.`,
+        subtext: `Uploaded with ${Math.round(90 - elapsedSeconds)}s to spare! Absolute neural synchronization.`,
         learnitCta: 'JOIN LEARNIT CLUB →',
         learnitQuote: 'Join our club for more such fun experiences and cool peeps!'
       };

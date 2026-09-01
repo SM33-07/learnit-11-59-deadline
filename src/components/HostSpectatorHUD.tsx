@@ -50,7 +50,7 @@ export function HostSpectatorHUD({ room, onRestart }: HostSpectatorHUDProps) {
   // -------------------------------------------------------------
   if (room.phase === 'RESOLVED') {
     const isVictory = room.verdict === 'VICTORY';
-    const elapsedSec = (room.endTime ? room.endTime - (room.startTime || 0) : 75000) / 1000;
+    const elapsedSec = (room.endTime ? room.endTime - (room.startTime || 0) : 90000) / 1000;
     const summary = getEndgameSummary(isVictory, room.uploadPercent, room.maxCombo, elapsedSec);
     const googleFormUrl = 'https://docs.google.com/forms/d/e/1FAIpQLScdpwK6YjFtwWux8XXBr7tJRYrIlJSdsTNbfT3mahZShdCxHQ/viewform';
 

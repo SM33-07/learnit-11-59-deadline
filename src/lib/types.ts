@@ -1,4 +1,5 @@
 // Core types for 11:59: DEADLINE PANIC
+// Server-Authoritative & Architecturally Isolated Asymmetric Information System
 
 export type PlayerRole = 'CONTROLS' | 'BLUEPRINTS' | 'DIRECTIVES';
 
@@ -9,29 +10,29 @@ export interface Player {
   color: 'yellow' | 'purple' | 'blue';
   isConnected: boolean;
   lastSeen: number;
-  // In 2-player mode, Player 2 has auto-switching active role
+  sessionToken: string;
+  // In 2-player mode, Player 2's active channel is derived from active task
   activeSubRole?: 'BLUEPRINTS' | 'DIRECTIVES';
 }
 
 export type GamePhase = 
   | 'LOBBY'
-  | 'BRIEFING'     // 5s pre-game role briefing
-  | 'ORIENT'       // 0–15s: 1 simple task
-  | 'PRESSURE'     // 15–35s: 2 overlapping tasks
-  | 'CRISIS'       // 35–55s: Coordinated team boss event
-  | 'MELTDOWN'     // 55–65s: Rapid-fire 4s directives
-  | 'FINAL_CHECK'  // 65–75s: Final submission sprint
-  | 'RESOLVED';    // Game ended (VICTORY / EXPELLED)
+  | 'BRIEFING'
+  | 'ORIENT'       // 0–20s
+  | 'PRESSURE'     // 20–45s
+  | 'CRISIS'       // 45–65s
+  | 'MELTDOWN'     // 65–80s
+  | 'FINAL_CHECK'  // 80–90s
+  | 'RESOLVED';
 
 export type GameVerdict = 'VICTORY' | 'EXPELLED' | null;
 
 export type ControlWidgetType = 
-  | 'TOGGLE'       // 2-state toggle switch (e.g. Yellow, Blue, Red, Green)
-  | 'ROTARY_DIAL'  // 0-100 dial target
-  | 'PUSH_BUTTON'  // Color/Shape buttons
-  | 'HOLD_LEVER'   // Hold down for N seconds
-  | 'SLIDER'       // Multi-position slider (e.g. 10%, 40%, 75%, 100%)
-  | 'KEYPAD';      // 3-digit pin code entry
+  | 'TOGGLE'
+  | 'ROTARY_DIAL'
+  | 'PUSH_BUTTON'
+  | 'HOLD_LEVER'
+  | 'SLIDER';
 
 export interface ControlWidget {
   id: string;
@@ -41,7 +42,6 @@ export interface ControlWidget {
   shape?: 'triangle' | 'square' | 'circle' | 'star' | 'bolt';
   currentValue: any;
   targetValue?: any;
-  options?: string[];
   min?: number;
   max?: number;
   requiredHoldSeconds?: number;
@@ -51,7 +51,6 @@ export interface TaskDirective {
   shoutText: string;
   targetRole: PlayerRole;
   urgency: 'normal' | 'urgent' | 'critical';
-  timeRemainingSec?: number;
 }
 
 export interface TaskBlueprint {
@@ -66,6 +65,8 @@ export interface TaskBlueprint {
   };
 }
 
+export type TaskStatus = 'ACTIVE' | 'RESOLVED_SUCCESS' | 'RESOLVED_FAILED' | 'EXPIRED';
+
 export interface ActiveTask {
   id: string;
   title: string;
@@ -74,8 +75,12 @@ export interface ActiveTask {
   expectedValue: any;
   directive: TaskDirective;
   blueprint: TaskBlueprint;
+  assignedChannel: 'BLUEPRINTS' | 'DIRECTIVES';
+  hint?: string;
+  hintRevealed?: boolean;
   createdAt: number;
   durationMs: number;
+  status: TaskStatus;
   completed: boolean;
 }
 
@@ -87,17 +92,90 @@ export interface CrisisEvent {
   requiredHoldMs: number;
   activePlayersNeeded: number;
   playersHolding: string[];
+  holdStartedAt: number | null; // Exact timestamp when required set started holding
   startedAt: number;
   durationMs: number;
   resolved: boolean;
 }
 
+// -------------------------------------------------------------
+// SANITIZED ASYMMETRIC PLAYER PROJECTIONS (ZERO LEAKAGE)
+// -------------------------------------------------------------
+
+export interface SanitizedWidget {
+  id: string;
+  type: ControlWidgetType;
+  label: string;
+  color: 'red' | 'blue' | 'yellow' | 'green' | 'purple' | 'amber';
+  shape?: 'triangle' | 'square' | 'circle' | 'star' | 'bolt';
+  currentValue: any;
+  min?: number;
+  max?: number;
+  requiredHoldSeconds?: number;
+}
+
+export interface SanitizedBlueprint {
+  title: string;
+  dangerClue?: string;
+  safeClue?: string;
+  safePathClue?: string;
+  targetValueLabel?: string | number;
+  hint?: string;
+  hintRevealed?: boolean;
+  remainingSec: number;
+}
+
+export interface SanitizedDirective {
+  title: string;
+  shoutText: string;
+  urgency: 'normal' | 'urgent' | 'critical';
+  hint?: string;
+  hintRevealed?: boolean;
+  remainingSec: number;
+}
+
+export interface SanitizedCrisis {
+  id: string;
+  title: string;
+  instruction: string;
+  requiredHoldMs: number;
+  activePlayersNeeded: number;
+  playersHolding: string[];
+  holdProgressPercent: number; // 0 to 100%
+  resolved: boolean;
+}
+
+export interface PlayerRoomView {
+  code: string;
+  phase: GamePhase;
+  mode: '2_PLAYER' | '3_PLAYER';
+  uploadPercent: number;
+  elapsedMs: number;
+  totalDurationMs: number;
+  verdict: GameVerdict;
+  myPlayer: {
+    id: string;
+    name: string;
+    role: PlayerRole;
+    color: 'yellow' | 'purple' | 'blue';
+    activeSubRole?: 'BLUEPRINTS' | 'DIRECTIVES';
+  };
+  // Asymmetric fields:
+  controlWidgets?: SanitizedWidget[];
+  schematics?: SanitizedBlueprint[];
+  directives?: SanitizedDirective[];
+  crisis: SanitizedCrisis | null;
+  activeTaskCount: number;
+}
+
 export interface PlayerActionPayload {
-  type: 'CONTROL_CHANGE' | 'CRISIS_HOLD_START' | 'CRISIS_HOLD_END';
-  taskId?: string;
+  sessionToken: string;
+  playerId: string;
+  type: 'CONTROL_CHANGE' | 'CRISIS_HOLD_START' | 'CRISIS_HOLD_END' | 'REQUEST_HINT' | 'HEARTBEAT';
   actionId?: string;
   widgetId?: string;
   value?: any;
+  taskId?: string;
   clientTimestamp?: number;
 }
 
@@ -120,20 +198,20 @@ export interface GameRoom {
   // Players
   players: Record<string, Player>;
   
-  // Game Metrics (Strictly clamped 0-100%)
+  // Metrics (Strictly 0-100%)
   uploadPercent: number;
-  chaosLevel: number; // 0-100%
+  chaosLevel: number;
   comboCount: number;
   maxCombo: number;
   successfulTasks: number;
   failedTasks: number;
   
-  // Dynamic Tasks & Active State
+  // Dynamic State
   activeTasks: ActiveTask[];
   controlWidgets: ControlWidget[];
   activeCrisis: CrisisEvent | null;
   
-  // Narrative Spectator Ticker
+  // Spectator Logs
   spectatorLogs: SpectatorLog[];
   spectatorHeadline: string;
   
@@ -142,6 +220,8 @@ export interface GameRoom {
   teamTitle?: string;
   teamScore?: number;
   
-  // LAN / Network info
+  // Server-Side Processed Actions Tracking (prevent replay/stale)
+  processedActionIds: Set<string>;
+  
   hostLanUrl?: string;
 }

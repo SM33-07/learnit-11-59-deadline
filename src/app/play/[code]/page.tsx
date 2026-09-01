@@ -2,41 +2,41 @@
 
 import React, { useEffect, useState, use } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import { GameRoom, Player } from '@/lib/types';
+import { PlayerRoomView, PlayerRole } from '@/lib/types';
+import { formatTimeRemaining } from '@/lib/phase-manager';
 import { MobileControlBoard } from '@/components/MobileControlBoard';
 import { MobileBlueprintCard } from '@/components/MobileBlueprintCard';
 import { MobileDirectiveCard } from '@/components/MobileDirectiveCard';
 import { CrisisOverlay } from '@/components/CrisisOverlay';
-import { formatTimeRemaining } from '@/lib/phase-manager';
-import { Sparkles, ArrowRight, ShieldAlert, CheckCircle, Clock, Volume2, Home } from 'lucide-react';
+import { ArrowRight, Home, Sparkles, Smartphone, ShieldCheck } from 'lucide-react';
 
-export default function PlayScreen({ params }: { params: Promise<{ code: string }> }) {
+interface PlayPageProps {
+  params: Promise<{ code: string }>;
+}
+
+export default function PlayPage({ params }: PlayPageProps) {
   const { code } = use(params);
   const upperCode = code.toUpperCase();
-  const searchParams = useSearchParams();
 
-  const [playerId, setPlayerId] = useState<string>('');
-  const [name, setName] = useState<string>('');
+  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [view, setView] = useState<PlayerRoomView | null>(null);
   const [isJoined, setIsJoined] = useState(false);
-  const [myPlayer, setMyPlayer] = useState<Player | null>(null);
-  const [room, setRoom] = useState<GameRoom | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
-  // Initialize or restore player session
+  // Initialize player session on mount
   useEffect(() => {
     let queryPid: string | null = null;
     let queryName: string | null = null;
+
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       queryPid = urlParams.get('pid');
       queryName = urlParams.get('name');
     }
 
-    let pid = queryPid;
-    if (!pid && typeof window !== 'undefined') {
-      pid = sessionStorage.getItem('panic_player_id') || localStorage.getItem('panic_player_id');
-    }
+    let pid = queryPid || (typeof window !== 'undefined' ? sessionStorage.getItem('panic_player_id') || localStorage.getItem('panic_player_id') : null);
     if (!pid) {
       pid = `p_${Math.random().toString(36).substring(2, 9)}`;
     }
@@ -47,59 +47,67 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
       localStorage.setItem('panic_player_id', pid);
     }
 
+    const storedToken = typeof window !== 'undefined' ? sessionStorage.getItem(`panic_token_${upperCode}`) : null;
+    if (storedToken) setSessionToken(storedToken);
+
     setPlayerId(pid);
 
     const storedName = typeof window !== 'undefined' ? (queryPid ? '' : localStorage.getItem('panic_player_name')) : '';
     const initialName = queryName || storedName || '';
     if (initialName) {
       setName(initialName);
-      // Auto-join if name is already present
       joinGame(pid, initialName);
     }
-  }, []);
+  }, [upperCode]);
 
-  // Connect to SSE stream + Polling fallback for guaranteed multi-phone sync
+  // Connect to sanitized SSE stream + Periodic state sync
   useEffect(() => {
-    if (!isJoined) return;
+    if (!isJoined || !playerId) return;
 
     let eventSource: EventSource | null = null;
     try {
-      eventSource = new EventSource(`/api/room/${upperCode}/stream`);
+      eventSource = new EventSource(`/api/room/${upperCode}/stream?playerId=${playerId}`);
       eventSource.onmessage = (event) => {
         try {
-          const updatedRoom = JSON.parse(event.data) as GameRoom;
-          setRoom(updatedRoom);
-          if (playerId && updatedRoom.players[playerId]) {
-            setMyPlayer(updatedRoom.players[playerId]);
-          }
-        } catch (err) {
-          console.error('Error parsing SSE room:', err);
-        }
+          const updatedView = JSON.parse(event.data) as PlayerRoomView;
+          setView(updatedView);
+        } catch {}
       };
-    } catch (err) {
-      console.error('SSE initialization error:', err);
-    }
+    } catch {}
 
-    // Fast polling fallback to guarantee 100% sync in iframes & mobile
+    // Polling fallback to sanitized endpoint
     const pollInterval = setInterval(() => {
-      fetch(`/api/room/${upperCode}`)
+      fetch(`/api/room/${upperCode}/state?playerId=${playerId}`)
         .then((res) => res.json())
         .then((data) => {
-          if (data.room) {
-            setRoom(data.room);
-            if (playerId && data.room.players[playerId]) {
-              setMyPlayer(data.room.players[playerId]);
-            }
+          if (data.view) {
+            setView(data.view);
           }
         })
         .catch(() => {});
     }, 1000);
 
+    // Heartbeat every 3s
+    const heartbeatInterval = setInterval(() => {
+      if (sessionToken) {
+        fetch(`/api/room/${upperCode}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'HEARTBEAT',
+            playerId,
+            sessionToken,
+          }),
+        }).catch(() => {});
+      }
+    }, 3000);
+
     return () => {
       eventSource?.close();
       clearInterval(pollInterval);
+      clearInterval(heartbeatInterval);
     };
-  }, [isJoined, upperCode, playerId]);
+  }, [isJoined, upperCode, playerId, sessionToken]);
 
   const joinGame = async (pid: string, playerName: string) => {
     try {
@@ -115,10 +123,19 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
       });
       const data = await res.json();
       if (data.success) {
-        setMyPlayer(data.player);
-        setRoom(data.room);
+        if (data.player?.sessionToken) {
+          setSessionToken(data.player.sessionToken);
+          sessionStorage.setItem(`panic_token_${upperCode}`, data.player.sessionToken);
+        }
         setIsJoined(true);
         localStorage.setItem('panic_player_name', playerName);
+
+        // Fetch initial sanitized projection immediately
+        const stateRes = await fetch(`/api/room/${upperCode}/state?playerId=${pid}`);
+        const stateData = await stateRes.json();
+        if (stateData.view) {
+          setView(stateData.view);
+        }
       }
     } catch (err) {
       console.error('Join error:', err);
@@ -134,66 +151,104 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
   const handleControlAction = async (widgetId: string, value: any) => {
     if (!playerId) return;
     try {
+      const actionId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const res = await fetch(`/api/room/${upperCode}/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          type: 'CONTROL_CHANGE',
+          actionId,
+          widgetId,
+          value,
           playerId,
-          action: {
-            type: 'CONTROL_CHANGE',
-            widgetId,
-            value,
-          },
+          sessionToken,
         }),
       });
       const data = await res.json();
       if (data.message) {
         setActionFeedback(data.message);
-        setTimeout(() => setActionFeedback(null), 2000);
+        setTimeout(() => setActionFeedback(null), 1500);
       }
     } catch (err) {
       console.error('Action error:', err);
     }
   };
 
+  const handleHintRequest = async () => {
+    if (!playerId) return;
+    try {
+      const res = await fetch(`/api/room/${upperCode}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'REQUEST_HINT',
+          playerId,
+          sessionToken,
+        }),
+      });
+      const data = await res.json();
+      if (data.message) {
+        setActionFeedback(data.message);
+        setTimeout(() => setActionFeedback(null), 2500);
+      }
+    } catch (err) {
+      console.error('Hint error:', err);
+    }
+  };
+
   const handleCrisisHoldStart = async () => {
     if (!playerId) return;
-    await fetch(`/api/room/${upperCode}/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        playerId,
-        action: { type: 'CRISIS_HOLD_START' },
-      }),
-    });
+    try {
+      await fetch(`/api/room/${upperCode}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'CRISIS_HOLD_START',
+          playerId,
+          sessionToken,
+        }),
+      });
+    } catch (err) {
+      console.error('Crisis hold start error:', err);
+    }
   };
 
   const handleCrisisHoldEnd = async () => {
     if (!playerId) return;
-    await fetch(`/api/room/${upperCode}/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        playerId,
-        action: { type: 'CRISIS_HOLD_END' },
-      }),
-    });
+    try {
+      await fetch(`/api/room/${upperCode}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'CRISIS_HOLD_END',
+          playerId,
+          sessionToken,
+        }),
+      });
+    } catch (err) {
+      console.error('Crisis hold end error:', err);
+    }
   };
 
-  // 1. JOIN FORM IF NOT YET JOINED
+  // Join Screen
   if (!isJoined) {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-4 bg-[#07090e] text-slate-100 font-mono scanlines">
-        <div className="max-w-sm w-full bg-[#101422] border-2 border-amber-500/50 rounded-3xl p-6 shadow-2xl glow-yellow text-center">
-          <div className="inline-block px-3 py-1 bg-amber-500/20 border border-amber-500/40 rounded-full text-[10px] text-amber-300 font-bold uppercase tracking-widest mb-3">
-            ROOM: {upperCode}
+      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#07090e] text-slate-100 font-mono text-center select-none touch-none">
+        <div className="max-w-md w-full bg-[#0d131f] border-2 border-amber-500 rounded-3xl p-6 sm:p-8 shadow-2xl glow-yellow flex flex-col items-center gap-6">
+          <div className="flex items-center gap-2 text-amber-400 font-bold text-xs tracking-widest uppercase">
+            <Smartphone className="w-4 h-4" />
+            <span>SQUAD JOIN • ROOM {upperCode}</span>
           </div>
-          <h1 className="text-2xl font-black text-white mb-2">ENTER YOUR NICKNAME</h1>
-          <p className="text-xs text-slate-400 mb-6">
-            Join your crew to tackle the 11:59 PM deadline panic!
+
+          <h1 className="text-3xl font-black text-white uppercase tracking-tight">
+            11:59: DEADLINE
+          </h1>
+
+          <p className="text-xs text-slate-300">
+            Enter your name to connect to the desk session!
           </p>
 
-          <form onSubmit={handleJoinSubmit} className="flex flex-col gap-3">
+          <form onSubmit={handleJoinSubmit} className="w-full flex flex-col gap-4">
             <input
               type="text"
               placeholder="e.g. Sam"
@@ -216,26 +271,27 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
     );
   }
 
-  // Waiting for room stream
-  if (!room || !myPlayer) {
+  // Waiting for stream projection
+  if (!view) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#07090e] text-amber-400 font-mono text-xs">
-        CONNECTING TO ROOM [{upperCode}]...
+      <div className="min-h-screen flex items-center justify-center bg-[#07090e] text-amber-400 font-mono text-xs select-none">
+        SYNCING ASYMMETRIC CONTROLS [{upperCode}]...
       </div>
     );
   }
 
-  const { displayTime, remainingSec } = formatTimeRemaining(room.elapsedMs);
-  const is2Player = room.mode === '2_PLAYER';
+  const { displayTime } = formatTimeRemaining(view.elapsedMs);
+  const myPlayer = view.myPlayer;
+  const is2Player = view.mode === '2_PLAYER';
 
   // -------------------------------------------------------------
-  // LOBBY STATE (SHOWS FULL RULES & ROLE INSTRUCTIONS ON PLAYER'S PHONE)
+  // LOBBY STATE (COMPACT 5-SECOND GLANCEABLE CARD)
   // -------------------------------------------------------------
-  if (room.phase === 'LOBBY' || room.phase === 'BRIEFING') {
+  if (view.phase === 'LOBBY' || view.phase === 'BRIEFING') {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-[#06080d] text-slate-100 font-mono text-center relative overflow-hidden">
+      <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-[#06080d] text-slate-100 font-mono text-center relative overflow-hidden select-none touch-none">
         <div
-          className={`max-w-md w-full rounded-3xl p-6 border-2 shadow-2xl backdrop-blur-md flex flex-col items-center gap-4 ${
+          className={`max-w-md w-full rounded-3xl p-6 border-2 shadow-2xl flex flex-col items-center gap-4 ${
             myPlayer.color === 'yellow'
               ? 'bg-[#181408] border-yellow-400 glow-yellow'
               : myPlayer.color === 'purple'
@@ -243,8 +299,8 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
               : 'bg-[#081524] border-cyan-400 glow-blue'
           }`}
         >
-          {/* Header Identity */}
-          <div className="flex items-center justify-between w-full border-b border-slate-800/80 pb-3">
+          {/* Header */}
+          <div className="flex items-center justify-between w-full border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <span className="text-2xl animate-bounce">
                 {myPlayer.color === 'yellow' ? '🟡' : myPlayer.color === 'purple' ? '🟣' : '🔵'}
@@ -259,66 +315,29 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
             </span>
           </div>
 
-          {/* Assigned Role Banner */}
-          <div className="w-full bg-black/80 border-2 border-slate-700/80 rounded-2xl p-4 text-left shadow-inner">
+          {/* Assigned Role Box */}
+          <div className="w-full bg-black/80 border-2 border-slate-700 rounded-2xl p-4 text-left shadow-inner">
             <span className="text-[10px] text-amber-400 uppercase tracking-widest font-black block mb-1">
-              🎯 YOUR ASSIGNED SQUAD ROLE:
+              YOUR ROLE:
             </span>
-            <span className="text-xl font-black text-white block uppercase mb-3">
+            <span className="text-xl font-black text-white block uppercase mb-2">
               {myPlayer.role === 'CONTROLS'
-                ? '🟡 THE CONTROLS (EXECUTE)'
+                ? '🟡 THE CONTROLS'
                 : myPlayer.role === 'BLUEPRINTS'
-                ? '🟣 THE BLUEPRINTS (DECODE)'
-                : '🔵 THE DIRECTIVES (SHOUT)'}
+                ? '🟣 THE BLUEPRINTS'
+                : '🔵 THE DIRECTIVES'}
             </span>
 
-            {/* 3 Step Role Instructions */}
-            <div className="space-y-2 text-xs font-mono text-slate-200">
-              {myPlayer.role === 'CONTROLS' ? (
-                <>
-                  <div className="flex items-start gap-2 bg-yellow-950/30 p-2 rounded-xl border border-yellow-500/20">
-                    <span>1.</span>
-                    <span><strong>Keep hands on buttons:</strong> Your phone will show switches, rotary dials, sliders, and levers.</span>
-                  </div>
-                  <div className="flex items-start gap-2 bg-yellow-950/30 p-2 rounded-xl border border-yellow-500/20">
-                    <span>2.</span>
-                    <span><strong>Listen to squad shouts:</strong> Directives will shout what to flip—listen closely!</span>
-                  </div>
-                  <div className="flex items-start gap-2 bg-yellow-950/30 p-2 rounded-xl border border-yellow-500/20">
-                    <span>3.</span>
-                    <span><strong>Avoid traps:</strong> Blueprints will verify safe buttons so you don't get electrocuted!</span>
-                  </div>
-                </>
-              ) : myPlayer.role === 'BLUEPRINTS' ? (
-                <>
-                  <div className="flex items-start gap-2 bg-purple-950/30 p-2 rounded-xl border border-purple-500/20">
-                    <span>1.</span>
-                    <span><strong>Decode security:</strong> Your phone displays schematics showing SAFE targets vs ELECTRIFIED TRAPS.</span>
-                  </div>
-                  <div className="flex items-start gap-2 bg-purple-950/30 p-2 rounded-xl border border-purple-500/20">
-                    <span>2.</span>
-                    <span><strong>Warn teammates:</strong> When Directives shouts an action, immediately verify if it's safe and shout the warning!</span>
-                  </div>
-                  <div className="flex items-start gap-2 bg-purple-950/30 p-2 rounded-xl border border-purple-500/20">
-                    <span>3.</span>
-                    <span><strong>Confirm values:</strong> Give the exact dial number or color code to Controls.</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-start gap-2 bg-blue-950/30 p-2 rounded-xl border border-blue-500/20">
-                    <span>1.</span>
-                    <span><strong>Scream commands:</strong> Your phone shows the action sequence. SHOUT each instruction LOUDLY to the squad!</span>
-                  </div>
-                  <div className="flex items-start gap-2 bg-blue-950/30 p-2 rounded-xl border border-blue-500/20">
-                    <span>2.</span>
-                    <span><strong>Speed matters:</strong> Keep the pace moving fast before the 11:59:59 midnight deadline strikes.</span>
-                  </div>
-                  <div className="flex items-start gap-2 bg-blue-950/30 p-2 rounded-xl border border-blue-500/20">
-                    <span>3.</span>
-                    <span><strong>Wait for confirmation:</strong> Once Controls executes the step, shout the next directive!</span>
-                  </div>
-                </>
+            {/* 1 Sentence Job */}
+            <div className="p-3 bg-white/5 rounded-xl border border-white/10 text-xs font-bold text-slate-200">
+              {myPlayer.role === 'CONTROLS' && (
+                <span>👉 <strong>EXECUTE HARDWARE:</strong> You have the switches & dials. Listen to what teammates shout!</span>
+              )}
+              {myPlayer.role === 'BLUEPRINTS' && (
+                <span>👉 <strong>DECODE SCHEMATICS:</strong> You see safe codes & trap warnings. Warn squad before they press!</span>
+              )}
+              {myPlayer.role === 'DIRECTIVES' && (
+                <span>👉 <strong>SHOUT COMMANDS:</strong> You see the action sequence. Scream instructions out loud!</span>
               )}
             </div>
           </div>
@@ -326,20 +345,20 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
           {/* Universal Emergency Rule */}
           <div className="w-full bg-[#1f0a14] border border-rose-500/40 rounded-xl p-3 text-left">
             <span className="text-[10px] text-rose-400 font-bold uppercase tracking-wider block mb-0.5">
-              🚨 SQUAD CRISIS PROTOCOL:
+              🚨 TEAM CRISIS RULE:
             </span>
             <p className="text-[11px] text-rose-200">
-              When campus Wi-Fi alarms sound, <strong>ALL squad members must hold down the emergency button together for 3 seconds!</strong>
+              When Wi-Fi alarms flash, <strong>ALL squad members must HOLD the sync button together for 3 seconds!</strong>
             </p>
           </div>
 
-          {/* Waiting Status */}
+          {/* Ready Status */}
           <div className="flex items-center gap-2 text-xs text-amber-400 font-black animate-pulse">
             <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>SQUAD CONNECTED • WAITING FOR HOST TO LAUNCH 75s CLOCK</span>
+            <span>CONNECTED • HOST WILL LAUNCH 90s COUNTDOWN</span>
           </div>
 
-          <div className="pt-2 border-t border-slate-800/80 w-full">
+          <div className="pt-2 border-t border-slate-800 w-full">
             <Link
               href="/"
               onClick={() => {
@@ -361,27 +380,29 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
   // -------------------------------------------------------------
   // ENDGAME RESOLUTION ON PHONE
   // -------------------------------------------------------------
-  if (room.phase === 'RESOLVED') {
-    const isVictory = room.verdict === 'VICTORY';
+  if (view.phase === 'RESOLVED') {
+    const isVictory = view.verdict === 'VICTORY';
     const googleFormUrl = 'https://docs.google.com/forms/d/e/1FAIpQLScdpwK6YjFtwWux8XXBr7tJRYrIlJSdsTNbfT3mahZShdCxHQ/viewform';
 
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#06080d] text-slate-100 font-mono text-center relative overflow-hidden">
+      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#06080d] text-slate-100 font-mono text-center select-none touch-none">
         <div
-          className={`max-w-md w-full rounded-3xl p-6 sm:p-8 border-2 shadow-2xl flex flex-col items-center ${
-            isVictory ? 'bg-[#0a1f18] border-emerald-500 glow-green' : 'bg-[#1f0a10] border-rose-500 glow-red'
+          className={`max-w-md w-full rounded-3xl p-6 sm:p-8 border-2 shadow-2xl flex flex-col items-center gap-4 ${
+            isVictory ? 'bg-[#081812] border-emerald-400 glow-green' : 'bg-[#18080c] border-rose-500 glow-red'
           }`}
         >
-          <div className="text-5xl mb-3">{isVictory ? '🎉' : '💀'}</div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white uppercase mb-2">
-            {isVictory ? 'SUBMISSION SUCCESSFUL!' : 'PORTAL LOCKED OUT!'}
+          <div className="text-5xl">{isVictory ? '🎉' : '💀'}</div>
+
+          <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-tight">
+            {isVictory ? 'SUBMISSION ACCEPTED!' : 'PORTAL LOCKED OUT!'}
           </h1>
-          <p className="text-sm text-slate-300 mb-6">
-            {isVictory ? 'You and your crew beat the 11:59:59 deadline!' : 'Deadline missed! Check the main screen for squad summary.'}
+
+          <p className="text-xs text-slate-300 mb-2">
+            Final Upload: <strong>{view.uploadPercent}%</strong>
           </p>
 
           {/* Official LearnIT Club Membership Box */}
-          <div className="bg-[#0b1324] border-2 border-cyan-400/80 rounded-2xl p-5 mb-4 text-left w-full glow-blue shadow-xl">
+          <div className="bg-[#0b1324] border-2 border-cyan-400 rounded-2xl p-5 mb-2 text-left w-full glow-blue shadow-xl">
             <div className="flex items-center gap-1.5 text-cyan-300 font-black text-xs uppercase tracking-widest mb-1">
               <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
               <span>LEARNIT CLUB MEMBERSHIP</span>
@@ -401,7 +422,7 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
           </div>
 
           <div className="text-[11px] text-slate-400">
-            Look up at the main booth screen for the full breakdown!
+            Look up at the booth screen for your team breakdown!
           </div>
         </div>
       </main>
@@ -412,7 +433,7 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
   // ACTIVE GAME CONTROLLER SCREEN
   // -------------------------------------------------------------
   return (
-    <main className="min-h-screen flex flex-col justify-between bg-[#07090e] text-slate-100 p-4 scanlines relative">
+    <main className="min-h-screen flex flex-col justify-between bg-[#07090e] text-slate-100 p-4 relative select-none touch-none">
       {/* Top Status HUD on Mobile */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
         <div className="flex items-center gap-2 font-mono">
@@ -427,12 +448,12 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
             {displayTime}
           </span>
           <span className="text-xs font-black text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-500/40">
-            {room.uploadPercent}%
+            {view.uploadPercent}%
           </span>
         </div>
       </div>
 
-      {/* 2-Player Dynamic Active Channel Banner (1 channel at a time) */}
+      {/* 2-Player Dynamic Active Channel Banner */}
       {is2Player && myPlayer.role === 'BLUEPRINTS' && (
         <div className="mb-3 w-full font-mono text-xs font-black uppercase tracking-wider transition-all">
           {myPlayer.activeSubRole === 'DIRECTIVES' ? (
@@ -456,37 +477,32 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
         </div>
       )}
 
-      {/* Active Role Content */}
+      {/* Active Role Content (Pure Asymmetric Projection) */}
       <div className="flex-1 flex flex-col items-center justify-start max-w-lg w-full mx-auto my-2">
-        {myPlayer.role === 'CONTROLS' && (
-          <MobileControlBoard widgets={room.controlWidgets} onAction={handleControlAction} />
+        {myPlayer.role === 'CONTROLS' && view.controlWidgets && (
+          <MobileControlBoard widgets={view.controlWidgets} onAction={handleControlAction} />
         )}
 
-        {myPlayer.role === 'BLUEPRINTS' && (
-          // In 2-player mode, if activeSubRole toggles to DIRECTIVES, show directives; otherwise blueprint
-          myPlayer.activeSubRole === 'DIRECTIVES' ? (
-            <MobileDirectiveCard tasks={room.activeTasks} />
-          ) : (
-            <MobileBlueprintCard tasks={room.activeTasks} />
-          )
+        {(myPlayer.role === 'BLUEPRINTS' || (is2Player && myPlayer.activeSubRole === 'BLUEPRINTS')) && view.schematics && (
+          <MobileBlueprintCard schematics={view.schematics} onHintRequest={handleHintRequest} />
         )}
 
-        {myPlayer.role === 'DIRECTIVES' && (
-          <MobileDirectiveCard tasks={room.activeTasks} />
+        {(myPlayer.role === 'DIRECTIVES' || (is2Player && myPlayer.activeSubRole === 'DIRECTIVES')) && view.directives && (
+          <MobileDirectiveCard directives={view.directives} onHintRequest={handleHintRequest} />
         )}
       </div>
 
       {/* Synchronized Boss Crisis Overlay */}
       <CrisisOverlay
-        crisis={room.activeCrisis}
-        playerId={playerId}
-        totalPlayers={Object.keys(room.players).length}
+        crisis={view.crisis}
+        playerId={playerId || ''}
+        totalPlayers={view.mode === '2_PLAYER' ? 2 : 3}
         onHoldStart={handleCrisisHoldStart}
         onHoldEnd={handleCrisisHoldEnd}
       />
 
       {/* Footer info */}
-      <div className="text-center font-mono text-[10px] text-slate-400 pt-2 border-t border-slate-800/80">
+      <div className="text-center font-mono text-[10px] text-slate-400 pt-2 border-t border-slate-800">
         ROOM {upperCode} • 11:59 PANIC
       </div>
     </main>

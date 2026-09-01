@@ -1,12 +1,36 @@
-// Core Room & Game State Manager with SSE broadcasting
-import { GameRoom, Player, PlayerRole, GamePhase, ControlWidget, ActiveTask, SpectatorLog } from './types';
+// Core Room & Game State Manager with Server-Authoritative Engine and Asymmetric Projections
+import {
+  GameRoom,
+  Player,
+  PlayerRole,
+  GamePhase,
+  ControlWidget,
+  ActiveTask,
+  SpectatorLog,
+  PlayerRoomView,
+  SanitizedWidget,
+  SanitizedBlueprint,
+  SanitizedDirective,
+  SanitizedCrisis,
+  PlayerActionPayload
+} from './types';
 import { generateVisualPuzzle, generateCrisisEvent } from './puzzle-engine';
 import { getPhaseForElapsed, GAME_DURATION_MS } from './phase-manager';
-import { handleTaskSuccess, handleMistake, handleCrisisSuccess, handleCrisisFail, getEndgameSummary, clampUpload } from './score-manager';
+import {
+  handleTaskSuccess,
+  handleMistake,
+  handleTaskTimeout,
+  handleCrisisSuccess,
+  handleCrisisFail,
+  getEndgameSummary,
+  clampUpload,
+  SCORE_RULES
+} from './score-manager';
 
 // Global in-memory storage for rooms
 const globalRooms: Record<string, GameRoom> = {};
-const sseSubscribers: Record<string, Set<(room: GameRoom) => void>> = {};
+const sseSubscribers: Record<string, Set<(data: any) => void>> = {};
+const sseSubscriberMap: Record<string, Map<(data: any) => void, string>> = {}; // Maps callback -> playerId or 'host'
 const gameTickers: Record<string, NodeJS.Timeout> = {};
 
 export function generateUniqueRoomCode(): string {
@@ -51,8 +75,9 @@ export function getOrCreateRoom(code: string, hostId: string = 'host', lanUrl?: 
           type: 'info'
         }
       ],
-      spectatorHeadline: 'WAITING FOR PANICKED HUMANS TO SCAN QR...',
+      spectatorHeadline: 'WAITING FOR SQUAD TO SCAN QR...',
       verdict: null,
+      processedActionIds: new Set<string>(),
       hostLanUrl: lanUrl,
     };
   }
@@ -63,21 +88,149 @@ export function getRoom(code: string): GameRoom | null {
   return globalRooms[code.toUpperCase()] || null;
 }
 
-export function subscribeToRoom(code: string, callback: (room: GameRoom) => void): () => void {
+// -------------------------------------------------------------
+// ASYMMETRIC STATE PROJECTION (ZERO SECRET LEAKAGE)
+// -------------------------------------------------------------
+
+export function getPlayerProjection(room: GameRoom, playerId: string): PlayerRoomView | null {
+  const player = room.players[playerId];
+  if (!player) return null;
+
+  const now = Date.now();
+  const is2Player = room.mode === '2_PLAYER';
+  const primaryTask = room.activeTasks.find((t) => !t.completed);
+
+  // Derive active sub-role for Player 2 in 2P mode deterministically
+  const activeSubRole: 'BLUEPRINTS' | 'DIRECTIVES' = is2Player
+    ? primaryTask?.assignedChannel || 'BLUEPRINTS'
+    : player.role === 'BLUEPRINTS'
+    ? 'BLUEPRINTS'
+    : 'DIRECTIVES';
+
+  // Sanitized Crisis Projection
+  let sanitizedCrisis: SanitizedCrisis | null = null;
+  if (room.activeCrisis && !room.activeCrisis.resolved) {
+    const holdStartedAt = room.activeCrisis.holdStartedAt;
+    const holdDuration = holdStartedAt ? Math.max(0, now - holdStartedAt) : 0;
+    const holdProgressPercent = Math.min(100, Math.round((holdDuration / room.activeCrisis.requiredHoldMs) * 100));
+
+    sanitizedCrisis = {
+      id: room.activeCrisis.id,
+      title: room.activeCrisis.title,
+      instruction: room.activeCrisis.instruction,
+      requiredHoldMs: room.activeCrisis.requiredHoldMs,
+      activePlayersNeeded: room.activeCrisis.activePlayersNeeded,
+      playersHolding: room.activeCrisis.playersHolding,
+      holdProgressPercent,
+      resolved: room.activeCrisis.resolved,
+    };
+  }
+
+  // Base view
+  const view: PlayerRoomView = {
+    code: room.code,
+    phase: room.phase,
+    mode: room.mode,
+    uploadPercent: room.uploadPercent,
+    elapsedMs: room.elapsedMs,
+    totalDurationMs: GAME_DURATION_MS,
+    verdict: room.verdict,
+    myPlayer: {
+      id: player.id,
+      name: player.name,
+      role: player.role,
+      color: player.color,
+      activeSubRole,
+    },
+    crisis: sanitizedCrisis,
+    activeTaskCount: room.activeTasks.filter((t) => !t.completed).length,
+  };
+
+  // 1. Controls Role Projection (Only interactive widgets, NO targetValue, NO expectedValue)
+  if (player.role === 'CONTROLS') {
+    view.controlWidgets = room.controlWidgets.map((w): SanitizedWidget => ({
+      id: w.id,
+      type: w.type,
+      label: w.label,
+      color: w.color,
+      shape: w.shape,
+      currentValue: w.currentValue,
+      min: w.min,
+      max: w.max,
+      requiredHoldSeconds: w.requiredHoldSeconds,
+    }));
+  }
+
+  // 2. Blueprints Role Projection (Only safe/danger schematic clues, NO widget IDs)
+  if (player.role === 'BLUEPRINTS' || (is2Player && activeSubRole === 'BLUEPRINTS')) {
+    view.schematics = room.activeTasks
+      .filter((t) => !t.completed)
+      .map((t): SanitizedBlueprint => {
+        const remainingMs = Math.max(0, t.durationMs - (now - t.createdAt));
+        return {
+          title: t.blueprint.title,
+          safeClue: t.blueprint.safePathClue,
+          dangerClue: t.blueprint.dangerClue,
+          targetValueLabel: t.blueprint.visualDiagram?.targetValue,
+          hint: t.hintRevealed ? t.hint : undefined,
+          hintRevealed: t.hintRevealed,
+          remainingSec: Math.ceil(remainingMs / 1000),
+        };
+      });
+  }
+
+  // 3. Directives Role Projection (Only shouting instructions, NO control widgets)
+  if (player.role === 'DIRECTIVES' || (is2Player && activeSubRole === 'DIRECTIVES')) {
+    view.directives = room.activeTasks
+      .filter((t) => !t.completed)
+      .map((t): SanitizedDirective => {
+        const remainingMs = Math.max(0, t.durationMs - (now - t.createdAt));
+        return {
+          title: t.title,
+          shoutText: t.directive.shoutText,
+          urgency: t.directive.urgency,
+          hint: t.hintRevealed ? t.hint : undefined,
+          hintRevealed: t.hintRevealed,
+          remainingSec: Math.ceil(remainingMs / 1000),
+        };
+      });
+  }
+
+  return view;
+}
+
+// -------------------------------------------------------------
+// REAL-TIME SSE SUBSCRIPTION & BROADCASTING
+// -------------------------------------------------------------
+
+export function subscribeToRoom(
+  code: string,
+  target: string | 'host',
+  callback: (data: GameRoom | PlayerRoomView) => void
+): () => void {
   const upperCode = code.toUpperCase();
   if (!sseSubscribers[upperCode]) {
     sseSubscribers[upperCode] = new Set();
+    sseSubscriberMap[upperCode] = new Map();
   }
-  sseSubscribers[upperCode].add(callback);
 
-  // Send current state immediately
+  sseSubscribers[upperCode].add(callback);
+  sseSubscriberMap[upperCode].set(callback, target);
+
+  // Send initial state immediately
   const room = getRoom(upperCode);
   if (room) {
-    callback(room);
+    if (target === 'host') {
+      callback(room);
+    } else {
+      const projection = getPlayerProjection(room, target);
+      if (projection) callback(projection);
+    }
   }
 
   return () => {
     sseSubscribers[upperCode]?.delete(callback);
+    sseSubscriberMap[upperCode]?.delete(callback);
   };
 }
 
@@ -89,9 +242,17 @@ export function broadcastRoomUpdate(code: string) {
   if (sseSubscribers[upperCode]) {
     sseSubscribers[upperCode].forEach((cb) => {
       try {
-        cb(room);
+        const target = sseSubscriberMap[upperCode]?.get(cb) || 'host';
+        if (target === 'host') {
+          cb(room);
+        } else {
+          const projection = getPlayerProjection(room, target);
+          if (projection) {
+            cb(projection);
+          }
+        }
       } catch (err) {
-        console.error('Error in SSE subscriber broadcast:', err);
+        console.error('Error in SSE broadcast callback:', err);
       }
     });
   }
@@ -99,48 +260,39 @@ export function broadcastRoomUpdate(code: string) {
 
 export function addSpectatorLog(room: GameRoom, text: string, type: SpectatorLog['type'] = 'info') {
   room.spectatorLogs.unshift({
-    id: `log_${Date.now()}_${Math.random()}`,
+    id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     timestamp: Date.now(),
     text,
     type,
   });
   if (room.spectatorLogs.length > 25) {
-    room.spectatorLogs.pop();
+    room.spectatorLogs = room.spectatorLogs.slice(0, 25);
   }
 }
 
-/**
- * Adds or reconnects a player to the room
- */
-export function joinPlayer(code: string, playerId: string, name: string): { player: Player; room: GameRoom } {
-  const room = getOrCreateRoom(code);
-  const playerIds = Object.keys(room.players);
+// -------------------------------------------------------------
+// PLAYER JOIN & SESSION MANAGEMENT
+// -------------------------------------------------------------
 
-  // Reconnection check
+export function joinPlayer(code: string, playerId: string, name: string): { player: Player; room: GameRoom } {
+  const upperCode = code.toUpperCase();
+  const room = getOrCreateRoom(upperCode);
+
+  // Clean reconnect: existing player keeps identity and role
   if (room.players[playerId]) {
+    room.players[playerId].name = name;
     room.players[playerId].isConnected = true;
     room.players[playerId].lastSeen = Date.now();
-    addSpectatorLog(room, `🟡 ${name} reconnected!`, 'info');
-    broadcastRoomUpdate(code);
+    broadcastRoomUpdate(upperCode);
     return { player: room.players[playerId], room };
   }
 
-  // Cap maximum connected players in a squad at 3
+  // Strict room capacity: Max 3 players
+  const playerIds = Object.keys(room.players);
   if (playerIds.length >= 3) {
-    return { 
-      player: {
-        id: playerId,
-        name: name.trim(),
-        role: 'DIRECTIVES',
-        color: 'blue',
-        isConnected: false,
-        lastSeen: Date.now(),
-      },
-      room 
-    };
+    throw new Error('Room is at full capacity (3 players maximum).');
   }
 
-  // Assign role based on join order
   let role: PlayerRole = 'CONTROLS';
   let color: Player['color'] = 'yellow';
 
@@ -155,39 +307,34 @@ export function joinPlayer(code: string, playerId: string, name: string): { play
     color = 'blue';
   }
 
+  // Generate lightweight session token
+  const sessionToken = `st_${Math.random().toString(36).substring(2, 12)}_${Date.now()}`;
+
   const newPlayer: Player = {
     id: playerId,
-    name: name.trim() || `Player ${playerIds.length + 1}`,
+    name: name.trim().substring(0, 16),
     role,
     color,
     isConnected: true,
     lastSeen: Date.now(),
+    sessionToken,
     activeSubRole: role === 'BLUEPRINTS' ? 'BLUEPRINTS' : undefined,
   };
 
   room.players[playerId] = newPlayer;
+  addSpectatorLog(room, `🎮 ${newPlayer.name} joined as ${role} (${color.toUpperCase()})`, 'info');
 
-  // Update mode automatically (capped between 2 and 3)
-  const totalCount = Math.min(3, Math.max(2, Object.keys(room.players).length));
-  room.mode = totalCount <= 2 ? '2_PLAYER' : '3_PLAYER';
-
-  addSpectatorLog(room, `${color === 'yellow' ? '🟡' : color === 'purple' ? '🟣' : '🔵'} ${newPlayer.name} joined as ${role}`, 'info');
-
-  if (totalCount === 2) {
-    room.spectatorHeadline = '2 PLAYERS READY! (Host can start briefing now or wait for Player 3)';
-  } else if (totalCount >= 3) {
-    room.spectatorHeadline = '3 PLAYERS READY! ALL SQUAD SLOTS FILLED!';
-  }
-
-  broadcastRoomUpdate(code);
+  broadcastRoomUpdate(upperCode);
   return { player: newPlayer, room };
 }
 
-/**
- * Starts the 75s live gameplay
- */
+// -------------------------------------------------------------
+// GAMEPLAY LAUNCH & TIMELINE TICKER
+// -------------------------------------------------------------
+
 export function startGame(code: string) {
-  const room = getRoom(code);
+  const upperCode = code.toUpperCase();
+  const room = getRoom(upperCode);
   if (!room || (room.phase !== 'LOBBY' && room.phase !== 'BRIEFING')) return;
 
   const activeCount = Math.min(3, Math.max(2, Object.values(room.players).filter((p) => p.isConnected).length));
@@ -203,229 +350,232 @@ export function startGame(code: string) {
   room.maxCombo = 0;
   room.successfulTasks = 0;
   room.failedTasks = 0;
-  room.spectatorHeadline = '11:58:45 — 75 SECONDS TO MIDNIGHT! SUBMIT THE PROJECT!';
-  addSpectatorLog(room, '🔥 DEADLINE CLOCK ACTIVE! 75 SECONDS TO 11:59:59!', 'danger');
+  room.spectatorHeadline = '11:58:30 — 90 SECONDS TO MIDNIGHT! SUBMIT THE PROJECT!';
+  addSpectatorLog(room, '🔥 DEADLINE CLOCK ACTIVE! 90 SECONDS TO 11:59:59!', 'danger');
 
-  // Populate initial tasks & widgets
+  // Populate initial task
   replenishTasks(room, 'easy', 1);
 
-  // Start tick loop
-  startRoomTicker(code);
-  broadcastRoomUpdate(code);
+  // Start server-authoritative tick loop
+  startRoomTicker(upperCode);
+  broadcastRoomUpdate(upperCode);
 }
 
-/**
- * Proceeds to game (alias of startGame)
- */
 export function proceedToGame(code: string) {
   startGame(code);
 }
 
 function replenishTasks(room: GameRoom, difficulty: 'easy' | 'medium' | 'hard', targetCount: number) {
-  // Keep active uncompleted tasks
   room.activeTasks = room.activeTasks.filter((t) => !t.completed);
 
   while (room.activeTasks.length < targetCount) {
-    const puzzle = generateVisualPuzzle(difficulty);
+    const puzzle = generateVisualPuzzle(difficulty, room.activeTasks.length);
     room.activeTasks.push(puzzle.task);
 
-    // Merge new widgets into controlWidgets (limit to 6 widgets on screen)
-    const existingWidgetIds = new Set(room.controlWidgets.map((w) => w.id));
-    const newWidgets = puzzle.widgets.filter((w) => !existingWidgetIds.has(w.id));
-    room.controlWidgets = [...room.controlWidgets.slice(-3), ...newWidgets];
-  }
-
-  // For 2-player mode, auto-switch Player 2's subrole based on active task
-  if (room.mode === '2_PLAYER') {
-    const p2 = Object.values(room.players).find((p) => p.role === 'BLUEPRINTS');
-    if (p2 && room.activeTasks.length > 0) {
-      // Toggle role for variety
-      p2.activeSubRole = p2.activeSubRole === 'BLUEPRINTS' ? 'DIRECTIVES' : 'BLUEPRINTS';
-    }
+    // Keep active widgets clean & aligned
+    room.controlWidgets = puzzle.widgets;
   }
 }
 
-/**
- * The 500ms Game Engine Ticker
- */
-function startRoomTicker(code: string) {
-  if (gameTickers[code]) {
-    clearInterval(gameTickers[code]);
+export function startRoomTicker(code: string) {
+  const upperCode = code.toUpperCase();
+  if (gameTickers[upperCode]) {
+    clearInterval(gameTickers[upperCode]);
   }
 
-  gameTickers[code] = setInterval(() => {
-    const room = getRoom(code);
-    if (!room || room.phase === 'LOBBY' || room.phase === 'RESOLVED' || !room.startTime) {
-      clearInterval(gameTickers[code]);
-      delete gameTickers[code];
+  gameTickers[upperCode] = setInterval(() => {
+    const room = globalRooms[upperCode];
+    if (!room || room.phase === 'LOBBY' || room.phase === 'RESOLVED') {
+      clearInterval(gameTickers[upperCode]);
+      delete gameTickers[upperCode];
       return;
     }
 
-    room.elapsedMs = Date.now() - room.startTime;
+    const now = Date.now();
+    const elapsed = now - (room.startTime || now);
+    room.elapsedMs = elapsed;
 
-    // Check if 75s deadline has been crossed
-    if (room.elapsedMs >= GAME_DURATION_MS) {
+    // 1. Connection Heartbeat Monitor (disconnect after 8s silence)
+    Object.values(room.players).forEach((p) => {
+      if (p.isConnected && now - p.lastSeen > 8000) {
+        p.isConnected = false;
+        addSpectatorLog(room, `⚠️ ${p.name} disconnected!`, 'warning');
+      }
+    });
+
+    // 2. Deadline Expiry Check
+    if (elapsed >= GAME_DURATION_MS) {
       finalizeGame(room, false);
-      broadcastRoomUpdate(code);
       return;
     }
 
-    // Determine current phase
-    const schedule = getPhaseForElapsed(room.elapsedMs);
-    const prevPhase = room.phase;
-    room.phase = schedule.phase;
-
-    // Phase transition announcements
-    if (prevPhase !== room.phase) {
-      addSpectatorLog(room, `⚡ ${schedule.label}`, 'warning');
-      room.spectatorHeadline = schedule.subtext;
+    // 3. Phase Transition Evaluation
+    const schedule = getPhaseForElapsed(elapsed);
+    if (room.phase !== schedule.phase) {
+      room.phase = schedule.phase;
+      room.spectatorHeadline = `${schedule.label} — ${schedule.subtext}`;
+      addSpectatorLog(room, `⚡ ${schedule.label}: ${schedule.subtext}`, 'warning');
 
       if (room.phase === 'CRISIS' && !room.activeCrisis) {
-        const activeCount = Math.min(3, Math.max(2, Object.values(room.players).filter((p) => p.isConnected).length));
+        const activeCount = Object.values(room.players).filter((p) => p.isConnected).length;
         room.activeCrisis = generateCrisisEvent(activeCount);
-        addSpectatorLog(room, `🚨 CRISIS TRIGGERED: ALL ${activeCount} SQUAD MEMBERS HOLD SYNC!`, 'danger');
       }
     }
 
-    // Handle Active Crisis Timeout
-    if (room.activeCrisis && !room.activeCrisis.resolved) {
-      const crisisElapsed = Date.now() - room.activeCrisis.startedAt;
-      if (crisisElapsed > room.activeCrisis.durationMs) {
-        // Crisis timed out / failed
-        room.activeCrisis.resolved = true;
-        const res = handleCrisisFail(room.uploadPercent, room.maxCombo);
+    // 4. Real Task Expiration Check (500ms server enforcement)
+    let tasksChanged = false;
+    for (const task of room.activeTasks) {
+      if (!task.completed && now >= task.createdAt + task.durationMs) {
+        task.status = 'EXPIRED';
+        task.completed = true;
+        room.failedTasks++;
+        const res = handleTaskTimeout(room.uploadPercent, room.maxCombo);
         room.uploadPercent = res.newUpload;
         room.comboCount = res.newCombo;
-        addSpectatorLog(room, res.message, 'danger');
-        room.spectatorHeadline = '💀 CRISIS FAILED! Upload speed penalized!';
+        addSpectatorLog(room, `⏳ ${task.title} TIMED OUT! ${res.message}`, 'danger');
+        tasksChanged = true;
       }
     }
 
-    // Ensure appropriate task density
-    if (room.phase !== 'CRISIS' || (room.activeCrisis && room.activeCrisis.resolved)) {
+    if (tasksChanged) {
       replenishTasks(room, schedule.difficulty, schedule.targetActiveTasks);
     }
 
-    // Update Chaos Level
-    room.chaosLevel = Math.min(100, Math.round((room.elapsedMs / GAME_DURATION_MS) * 100));
+    // 5. Exact Simultaneous Crisis Hold Evaluation (3.0s Continuous Set)
+    if (room.activeCrisis && !room.activeCrisis.resolved) {
+      const crisis = room.activeCrisis;
+      const holders = crisis.playersHolding;
+      const needed = crisis.activePlayersNeeded;
 
-    // Dynamic Spectator Narrative ticker
-    updateSpectatorNarrative(room);
+      if (holders.length >= needed) {
+        if (!crisis.holdStartedAt) {
+          crisis.holdStartedAt = now;
+        } else if (now - crisis.holdStartedAt >= crisis.requiredHoldMs) {
+          // Exactly 3.0 seconds continuous hold completed!
+          crisis.resolved = true;
+          const res = handleCrisisSuccess(room.uploadPercent, room.comboCount, room.maxCombo);
+          room.uploadPercent = res.newUpload;
+          room.comboCount = res.newCombo;
+          room.maxCombo = res.newMaxCombo;
+          addSpectatorLog(room, res.message, 'success');
 
-    broadcastRoomUpdate(code);
-  }, 500);
-}
-
-function updateSpectatorNarrative(room: GameRoom) {
-  const remainingSec = Math.ceil((GAME_DURATION_MS - room.elapsedMs) / 1000);
-
-  if (room.uploadPercent >= 85) {
-    room.spectatorHeadline = `🔥 ${room.uploadPercent}% UPLOADED! ONE MORE PUSH!`;
-  } else if (remainingSec <= 10) {
-    room.spectatorHeadline = `🚨 FINAL 10 SECONDS! SOMEONE PRESS SOMETHING!`;
-  } else if (room.comboCount >= 3) {
-    room.spectatorHeadline = `💥 PANIC COMBO x${room.comboCount} — THEY ARE LOCKING IN!`;
-  } else if (room.phase === 'CRISIS') {
-    room.spectatorHeadline = `🚨 ALL PLAYERS: HOLD THE SYNC BUTTON TOGETHER!`;
-  } else {
-    const randomHints = [
-      '🟡 Yellow has the switches! Listen to teammates!',
-      '🟣 Purple has the blueprints! Read the safe path!',
-      '🔵 Blue has the directive! Shout the sequence!',
-    ];
-    if (Math.random() < 0.2) {
-      room.spectatorHeadline = randomHints[Math.floor(Math.random() * randomHints.length)];
+          if (res.isVictory) {
+            finalizeGame(room, true);
+            return;
+          }
+        }
+      } else {
+        // Required set broken -> reset hold timer
+        crisis.holdStartedAt = null;
+      }
     }
-  }
+
+    // Replenish active tasks if needed
+    replenishTasks(room, schedule.difficulty, schedule.targetActiveTasks);
+
+    broadcastRoomUpdate(upperCode);
+  }, 250);
 }
 
-/**
- * Processes participant player actions from mobile phones
- */
+// -------------------------------------------------------------
+// SERVER-AUTHORITATIVE ACTION HANDLER
+// -------------------------------------------------------------
+
 export function handlePlayerAction(
   code: string,
   playerId: string,
-  action: {
-    type: 'CONTROL_CHANGE' | 'CRISIS_HOLD_START' | 'CRISIS_HOLD_END';
-    taskId?: string;
-    actionId?: string;
-    widgetId?: string;
-    value?: any;
-    clientTimestamp?: number;
-  }
-): { success: boolean; message: string; isVictory?: boolean } {
-  const room = getRoom(code);
+  payload: PlayerActionPayload
+): { success: boolean; message: string; isVictory?: boolean; error?: string } {
+  const upperCode = code.toUpperCase();
+  const room = getRoom(upperCode);
   if (!room || room.phase === 'LOBBY' || room.phase === 'RESOLVED') {
-    return { success: false, message: 'Game not active or already resolved.' };
+    return { success: false, message: 'Game not active or already resolved.', error: 'Game not active' };
   }
 
-  // Update player heartbeat
-  if (room.players[playerId]) {
-    room.players[playerId].lastSeen = Date.now();
-    room.players[playerId].isConnected = true;
+  const player = room.players[playerId];
+  if (!player) {
+    return { success: false, message: 'Unrecognized player ID.', error: 'Player not found' };
   }
 
-  // Stale-action protection: check if targeted task is still active and valid
-  if (action.taskId) {
-    const taskExists = room.activeTasks.some((t) => t.id === action.taskId && !t.completed);
-    if (!taskExists) {
-      return { success: false, message: 'Task already expired or solved by teammate.' };
+  // Verify Session Token (if provided)
+  if (payload.sessionToken && player.sessionToken && payload.sessionToken !== player.sessionToken) {
+    return { success: false, message: 'Invalid session token.', error: 'Unauthorized session' };
+  }
+
+  // Update heartbeat
+  player.lastSeen = Date.now();
+  player.isConnected = true;
+
+  // Stale / Duplicate Action Protection
+  if (payload.actionId) {
+    if (room.processedActionIds.has(payload.actionId)) {
+      return { success: false, message: 'Duplicate action rejected.', error: 'Duplicate action' };
     }
+    room.processedActionIds.add(payload.actionId);
   }
 
-  // Handle Crisis Hold actions
-  if (action.type === 'CRISIS_HOLD_START') {
+  // 1. Heartbeat Ping
+  if (payload.type === 'HEARTBEAT') {
+    return { success: true, message: 'Heartbeat acknowledged' };
+  }
+
+  // 2. Hint Request Action (-3% Upload Penalty)
+  if (payload.type === 'REQUEST_HINT') {
+    const task = room.activeTasks.find((t) => !t.completed);
+    if (task && !task.hintRevealed) {
+      task.hintRevealed = true;
+      room.uploadPercent = clampUpload(room.uploadPercent - SCORE_RULES.HINT_PENALTY_UPLOAD);
+      addSpectatorLog(room, `💡 Hint revealed for ${task.title}! (-${SCORE_RULES.HINT_PENALTY_UPLOAD}% Upload)`, 'warning');
+      broadcastRoomUpdate(upperCode);
+      return { success: true, message: 'Hint revealed (-3% Upload Penalty)' };
+    }
+    return { success: true, message: 'Hint already visible' };
+  }
+
+  // 3. Synchronized Crisis Hold Actions
+  if (payload.type === 'CRISIS_HOLD_START') {
     if (room.activeCrisis && !room.activeCrisis.resolved) {
       if (!room.activeCrisis.playersHolding.includes(playerId)) {
         room.activeCrisis.playersHolding.push(playerId);
+        // Reset hold timer since set changed
+        room.activeCrisis.holdStartedAt = room.activeCrisis.playersHolding.length >= room.activeCrisis.activePlayersNeeded ? Date.now() : null;
       }
-      const needed = Math.min(3, Math.max(2, Object.values(room.players).filter((p) => p.isConnected).length));
-      if (room.activeCrisis.playersHolding.length >= needed) {
-        // All players are holding! Success!
-        room.activeCrisis.resolved = true;
-        const res = handleCrisisSuccess(room.uploadPercent, room.comboCount, room.maxCombo);
-        room.uploadPercent = res.newUpload;
-        room.comboCount = res.newCombo;
-        room.maxCombo = res.newMaxCombo;
-        addSpectatorLog(room, res.message, 'success');
-
-        if (res.isVictory) {
-          finalizeGame(room, true);
-        }
-        broadcastRoomUpdate(code);
-        return { success: true, message: res.message, isVictory: res.isVictory };
-      }
-      broadcastRoomUpdate(code);
-      return { success: true, message: 'Holding sync button...' };
+      broadcastRoomUpdate(upperCode);
+      return { success: true, message: 'Holding emergency sync...' };
     }
   }
 
-  if (action.type === 'CRISIS_HOLD_END') {
+  if (payload.type === 'CRISIS_HOLD_END') {
     if (room.activeCrisis) {
       room.activeCrisis.playersHolding = room.activeCrisis.playersHolding.filter((id) => id !== playerId);
-      broadcastRoomUpdate(code);
+      room.activeCrisis.holdStartedAt = null; // Set broken
+      broadcastRoomUpdate(upperCode);
       return { success: true, message: 'Released hold.' };
     }
   }
 
-  // Handle Control Widget Interactions
-  if (action.type === 'CONTROL_CHANGE' && action.widgetId) {
-    const { widgetId, value } = action;
+  // 4. Control Widget Interactions (Strict Role Authorization)
+  if (payload.type === 'CONTROL_CHANGE' && payload.widgetId) {
+    const is2Player = room.mode === '2_PLAYER';
+    // Strict Authorization: Only Controls role (or 2P player 1) may touch hardware
+    if (player.role !== 'CONTROLS') {
+      return { success: false, message: 'Unauthorized role action. Only Controls player can operate switches.', error: 'Unauthorized role' };
+    }
 
-    // Find the widget on the board
+    const { widgetId, value } = payload;
     const widget = room.controlWidgets.find((w) => w.id === widgetId);
     if (widget) {
       widget.currentValue = value;
     }
 
-    // Check if this action satisfies any active task
-    const matchingTask = room.activeTasks.find((t) => t.targetWidgetId === widgetId && !t.completed);
+    // Match against primary active uncompleted task
+    const matchingTask = room.activeTasks.find((t) => !t.completed && (t.targetWidgetId === widgetId || t.targetWidgetId.startsWith(widgetId)));
 
     if (matchingTask) {
       // Validate expected value
       let isCorrect = false;
       if (widget?.type === 'ROTARY_DIAL') {
-        isCorrect = Math.abs(Number(value) - Number(matchingTask.expectedValue)) <= 4;
+        isCorrect = Math.abs(Number(value) - Number(matchingTask.expectedValue)) <= 2;
       } else if (widget?.type === 'HOLD_LEVER') {
         isCorrect = Number(value) >= Number(matchingTask.expectedValue);
       } else {
@@ -433,134 +583,128 @@ export function handlePlayerAction(
       }
 
       if (isCorrect) {
+        // Single-Resolution Guarantee: Mark SUCCESS immediately
+        matchingTask.status = 'RESOLVED_SUCCESS';
         matchingTask.completed = true;
         room.successfulTasks++;
         const res = handleTaskSuccess(room.uploadPercent, room.comboCount, room.maxCombo);
         room.uploadPercent = res.newUpload;
         room.comboCount = res.newCombo;
         room.maxCombo = res.newMaxCombo;
-
         addSpectatorLog(room, `✅ ${matchingTask.title} SOLVED! ${res.message}`, 'success');
-
-        // For 2-player fairness: toggle active sub-role sequentially so only 1 channel is active at a time
-        if (room.mode === '2_PLAYER') {
-          const p2 = Object.values(room.players).find((p) => p.role === 'BLUEPRINTS');
-          if (p2) {
-            p2.activeSubRole = p2.activeSubRole === 'BLUEPRINTS' ? 'DIRECTIVES' : 'BLUEPRINTS';
-          }
-        }
 
         if (res.isVictory) {
           finalizeGame(room, true);
-        } else {
-          // Replenish next task
-          const schedule = getPhaseForElapsed(room.elapsedMs);
-          replenishTasks(room, schedule.difficulty, schedule.targetActiveTasks);
+          return { success: true, message: res.message, isVictory: true };
         }
 
-        broadcastRoomUpdate(code);
-        return { success: true, message: res.message, isVictory: res.isVictory };
+        // Replenish fresh task immediately
+        const schedule = getPhaseForElapsed(room.elapsedMs);
+        replenishTasks(room, schedule.difficulty, schedule.targetActiveTasks);
+        broadcastRoomUpdate(upperCode);
+        return { success: true, message: res.message };
       } else {
-        // Wrong setting / trap activated!
+        // Single-Resolution Guarantee: Mark FAILED immediately and advance
+        matchingTask.status = 'RESOLVED_FAILED';
+        matchingTask.completed = true;
         room.failedTasks++;
         const res = handleMistake(room.uploadPercent, room.maxCombo);
         room.uploadPercent = res.newUpload;
         room.comboCount = res.newCombo;
+        addSpectatorLog(room, `❌ ${matchingTask.title} FAILED! ${res.message}`, 'danger');
 
-        addSpectatorLog(room, `❌ MISTAKE ON ${widget?.label || 'CONTROL'}! ${res.message}`, 'danger');
-        broadcastRoomUpdate(code);
+        // Replenish fresh task immediately to avoid stuck penalty loop
+        const schedule = getPhaseForElapsed(room.elapsedMs);
+        replenishTasks(room, schedule.difficulty, schedule.targetActiveTasks);
+        broadcastRoomUpdate(upperCode);
         return { success: false, message: res.message };
       }
-    } else {
-      // Pressed an unrequested control or trap
-      room.failedTasks++;
-      const res = handleMistake(room.uploadPercent, room.maxCombo);
-      room.uploadPercent = res.newUpload;
-      room.comboCount = res.newCombo;
-
-      addSpectatorLog(room, `⚠️ WRONG SWITCH HIT! ${res.message}`, 'danger');
-      broadcastRoomUpdate(code);
-      return { success: false, message: res.message };
     }
   }
 
-  return { success: false, message: 'Invalid action.' };
+  return { success: true, message: 'Action processed' };
 }
 
-/**
- * Atomically Finalizes the Game
- */
+// -------------------------------------------------------------
+// ENDGAME RESOLUTION & VICTORY ATOMICITY
+// -------------------------------------------------------------
+
 export function finalizeGame(room: GameRoom, isVictory: boolean) {
+  if (room.phase === 'RESOLVED') return; // Idempotent
+
   room.phase = 'RESOLVED';
   room.endTime = Date.now();
   room.verdict = isVictory ? 'VICTORY' : 'EXPELLED';
-  room.uploadPercent = isVictory ? 100 : clampUpload(room.uploadPercent);
+
+  if (gameTickers[room.code]) {
+    clearInterval(gameTickers[room.code]);
+    delete gameTickers[room.code];
+  }
 
   const elapsedSec = (room.endTime - (room.startTime || room.endTime)) / 1000;
   const summary = getEndgameSummary(isVictory, room.uploadPercent, room.maxCombo, elapsedSec);
-
   room.teamTitle = summary.title;
-  room.spectatorHeadline = isVictory
-    ? '🎉 PROJECT SUBMITTED AT 11:59:58! YOU SURVIVED!'
-    : '💀 PORTAL CLOSED AT 11:59:59! EXPELLED!';
 
-  addSpectatorLog(
-    room,
-    isVictory
-      ? `🏆 VICTORY: Grade ${summary.grade} - ${summary.title}`
-      : `💀 FAILED: Grade ${summary.grade} - ${summary.title}`,
-    isVictory ? 'success' : 'danger'
-  );
-}
-
-/**
- * Admin Stall Controls
- */
-export function handleAdminCommand(
-  code: string,
-  command: 'RESET' | 'FORCE_WIN' | 'FORCE_LOSE' | 'SKIP_PHASE' | 'START_2P' | 'START_3P'
-): GameRoom | null {
-  const room = getRoom(code);
-  if (!room) return null;
-
-  switch (command) {
-    case 'RESET':
-      room.phase = 'LOBBY';
-      room.startTime = null;
-      room.endTime = null;
-      room.elapsedMs = 0;
-      room.uploadPercent = 0;
-      room.chaosLevel = 10;
-      room.comboCount = 0;
-      room.activeTasks = [];
-      room.controlWidgets = [];
-      room.activeCrisis = null;
-      room.verdict = null;
-      room.spectatorHeadline = 'ROOM RESET. READY FOR NEXT CREW!';
-      addSpectatorLog(room, '🔄 Room reset by host admin.', 'info');
-      break;
-
-    case 'FORCE_WIN':
-      finalizeGame(room, true);
-      break;
-
-    case 'FORCE_LOSE':
-      finalizeGame(room, false);
-      break;
-
-    case 'SKIP_PHASE':
-      if (room.phase === 'ORIENT') room.elapsedMs = 15000;
-      else if (room.phase === 'PRESSURE') room.elapsedMs = 35000;
-      else if (room.phase === 'CRISIS') room.elapsedMs = 55000;
-      else if (room.phase === 'MELTDOWN') room.elapsedMs = 65000;
-      break;
-
-    case 'START_2P':
-    case 'START_3P':
-      startGame(code);
-      break;
+  if (isVictory) {
+    room.uploadPercent = 100;
+    room.spectatorHeadline = `SUBMISSION ACCEPTED! GRADE: ${summary.grade}`;
+    addSpectatorLog(room, `🏆 PROJECT SUBMITTED! Grade: ${summary.grade}`, 'success');
+  } else {
+    room.spectatorHeadline = `11:59:59 — DEADLINE MISSED! GRADE: ${summary.grade}`;
+    addSpectatorLog(room, `💀 DEADLINE MISSED! Grade: ${summary.grade}`, 'danger');
   }
 
-  broadcastRoomUpdate(code);
+  broadcastRoomUpdate(room.code);
+}
+
+export function handleAdminCommand(code: string, command: string): GameRoom | null {
+  const upperCode = code.toUpperCase();
+  const room = getRoom(upperCode);
+  if (!room) return null;
+
+  if (command === 'RESET') {
+    return resetRoom(upperCode);
+  }
+
+  if (command === 'FORCE_WIN') {
+    finalizeGame(room, true);
+    return room;
+  }
+
+  if (command === 'FORCE_FAIL') {
+    finalizeGame(room, false);
+    return room;
+  }
+
+  if (command === 'TRIGGER_CRISIS') {
+    const activeCount = Object.values(room.players).filter((p) => p.isConnected).length;
+    room.phase = 'CRISIS';
+    room.activeCrisis = generateCrisisEvent(activeCount);
+    addSpectatorLog(room, '🚨 ADMIN: Triggered emergency crisis event!', 'danger');
+    broadcastRoomUpdate(upperCode);
+    return room;
+  }
+
+  if (command === 'SKIP_PHASE') {
+    const now = Date.now();
+    const currentElapsed = room.elapsedMs;
+    const schedule = getPhaseForElapsed(currentElapsed);
+    room.startTime = (room.startTime || now) - (schedule.endMs - currentElapsed + 1000);
+    broadcastRoomUpdate(upperCode);
+    return room;
+  }
+
   return room;
+}
+
+export function resetRoom(code: string): GameRoom {
+  const upperCode = code.toUpperCase();
+  if (gameTickers[upperCode]) {
+    clearInterval(gameTickers[upperCode]);
+    delete gameTickers[upperCode];
+  }
+  delete globalRooms[upperCode];
+  const fresh = getOrCreateRoom(upperCode);
+  broadcastRoomUpdate(upperCode);
+  return fresh;
 }

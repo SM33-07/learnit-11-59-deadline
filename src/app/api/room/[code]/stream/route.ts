@@ -1,21 +1,22 @@
 import { NextRequest } from 'next/server';
 import { subscribeToRoom, getOrCreateRoom } from '@/lib/room-manager';
-import { GameRoom } from '@/lib/types';
+import { GameRoom, PlayerRoomView } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
   const upperCode = code.toUpperCase();
+  const playerId = req.nextUrl.searchParams.get('playerId') || 'host';
 
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
 
-      const sendEvent = (room: GameRoom) => {
+      const sendEvent = (data: GameRoom | PlayerRoomView) => {
         try {
-          const data = `data: ${JSON.stringify(room)}\n\n`;
-          controller.enqueue(encoder.encode(data));
+          const payload = `data: ${JSON.stringify(data)}\n\n`;
+          controller.enqueue(encoder.encode(payload));
         } catch {
           // Stream closed
         }
@@ -24,8 +25,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
       // Ensure room exists
       getOrCreateRoom(upperCode);
 
-      // Subscribe to updates
-      const unsubscribe = subscribeToRoom(upperCode, sendEvent);
+      // Subscribe to sanitized stream
+      const unsubscribe = subscribeToRoom(upperCode, playerId, sendEvent);
 
       // Send keep-alive ping every 15s
       const pingInterval = setInterval(() => {

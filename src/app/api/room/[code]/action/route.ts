@@ -5,13 +5,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cod
   try {
     const { code } = await params;
     const body = await req.json();
-    const { playerId, action } = body;
+    const playerId = body.playerId;
+    const actionPayload = body.action || body;
 
-    if (!playerId || !action) {
+    if (!playerId || !actionPayload.type) {
       return NextResponse.json({ success: false, error: 'Missing playerId or action' }, { status: 400 });
     }
 
-    const result = handlePlayerAction(code, playerId, action);
+    const result = handlePlayerAction(code, playerId, actionPayload);
     return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

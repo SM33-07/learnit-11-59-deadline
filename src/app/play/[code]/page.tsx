@@ -229,53 +229,121 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
   const is2Player = room.mode === '2_PLAYER';
 
   // -------------------------------------------------------------
-  // LOBBY STATE (WAITING FOR HOST TO CLICK START)
+  // LOBBY STATE (SHOWS FULL RULES & ROLE INSTRUCTIONS ON PLAYER'S PHONE)
   // -------------------------------------------------------------
-  if (room.phase === 'LOBBY') {
+  if (room.phase === 'LOBBY' || room.phase === 'BRIEFING') {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#07090e] text-slate-100 font-mono text-center scanlines">
+      <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-[#06080d] text-slate-100 font-mono text-center relative overflow-hidden">
         <div
           className={`max-w-md w-full rounded-3xl p-6 border-2 shadow-2xl backdrop-blur-md flex flex-col items-center gap-4 ${
             myPlayer.color === 'yellow'
-              ? 'bg-[#18150a] border-yellow-500 glow-yellow'
+              ? 'bg-[#181408] border-yellow-400 glow-yellow'
               : myPlayer.color === 'purple'
-              ? 'bg-[#160d1f] border-purple-500 glow-purple'
-              : 'bg-[#091522] border-blue-500 glow-blue'
+              ? 'bg-[#160a22] border-purple-400 glow-purple'
+              : 'bg-[#081524] border-cyan-400 glow-blue'
           }`}
         >
-          <div className="text-4xl animate-bounce">
-            {myPlayer.color === 'yellow' ? '🟡' : myPlayer.color === 'purple' ? '🟣' : '🔵'}
+          {/* Header Identity */}
+          <div className="flex items-center justify-between w-full border-b border-slate-800/80 pb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl animate-bounce">
+                {myPlayer.color === 'yellow' ? '🟡' : myPlayer.color === 'purple' ? '🟣' : '🔵'}
+              </span>
+              <div className="text-left">
+                <span className="text-[10px] text-slate-400 uppercase tracking-widest block font-bold">CONNECTED AS</span>
+                <span className="text-base font-black text-white">{myPlayer.name}</span>
+              </div>
+            </div>
+            <span className="text-[10px] font-mono bg-black/60 px-2.5 py-1 rounded-full border border-slate-700 text-amber-300 font-bold">
+              ROOM {upperCode}
+            </span>
           </div>
 
-          <span className="text-xs uppercase tracking-widest text-slate-400">YOU ARE CONNECTED AS</span>
-          <h2 className="text-2xl font-black text-white">{myPlayer.name}</h2>
-
-          <div className="w-full bg-black/60 border border-slate-700/60 rounded-2xl p-4 text-left">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">YOUR ASSIGNED ROLE:</span>
-            <span className="text-lg font-black text-white block uppercase">
-              {myPlayer.role === 'CONTROLS'
-                ? '🟡 THE CONTROLS'
-                : myPlayer.role === 'BLUEPRINTS'
-                ? '🟣 THE BLUEPRINTS'
-                : '🔵 THE DIRECTIVES'}
+          {/* Assigned Role Banner */}
+          <div className="w-full bg-black/80 border-2 border-slate-700/80 rounded-2xl p-4 text-left shadow-inner">
+            <span className="text-[10px] text-amber-400 uppercase tracking-widest font-black block mb-1">
+              🎯 YOUR ASSIGNED SQUAD ROLE:
             </span>
-            <p className="text-xs text-slate-300 mt-2">
+            <span className="text-xl font-black text-white block uppercase mb-3">
               {myPlayer.role === 'CONTROLS'
-                ? 'You have tactile switches & dials. Listen to teammates!'
+                ? '🟡 THE CONTROLS (EXECUTE)'
                 : myPlayer.role === 'BLUEPRINTS'
-                ? 'You have the security schematics. Warn about traps & safe codes!'
-                : 'You have the action sequence. Shout instructions out loud!'}
+                ? '🟣 THE BLUEPRINTS (DECODE)'
+                : '🔵 THE DIRECTIVES (SHOUT)'}
+            </span>
+
+            {/* 3 Step Role Instructions */}
+            <div className="space-y-2 text-xs font-mono text-slate-200">
+              {myPlayer.role === 'CONTROLS' ? (
+                <>
+                  <div className="flex items-start gap-2 bg-yellow-950/30 p-2 rounded-xl border border-yellow-500/20">
+                    <span>1.</span>
+                    <span><strong>Keep hands on buttons:</strong> Your phone will show switches, rotary dials, sliders, and levers.</span>
+                  </div>
+                  <div className="flex items-start gap-2 bg-yellow-950/30 p-2 rounded-xl border border-yellow-500/20">
+                    <span>2.</span>
+                    <span><strong>Listen to squad shouts:</strong> Directives will shout what to flip—listen closely!</span>
+                  </div>
+                  <div className="flex items-start gap-2 bg-yellow-950/30 p-2 rounded-xl border border-yellow-500/20">
+                    <span>3.</span>
+                    <span><strong>Avoid traps:</strong> Blueprints will verify safe buttons so you don't get electrocuted!</span>
+                  </div>
+                </>
+              ) : myPlayer.role === 'BLUEPRINTS' ? (
+                <>
+                  <div className="flex items-start gap-2 bg-purple-950/30 p-2 rounded-xl border border-purple-500/20">
+                    <span>1.</span>
+                    <span><strong>Decode security:</strong> Your phone displays schematics showing SAFE targets vs ELECTRIFIED TRAPS.</span>
+                  </div>
+                  <div className="flex items-start gap-2 bg-purple-950/30 p-2 rounded-xl border border-purple-500/20">
+                    <span>2.</span>
+                    <span><strong>Warn teammates:</strong> When Directives shouts an action, immediately verify if it's safe and shout the warning!</span>
+                  </div>
+                  <div className="flex items-start gap-2 bg-purple-950/30 p-2 rounded-xl border border-purple-500/20">
+                    <span>3.</span>
+                    <span><strong>Confirm values:</strong> Give the exact dial number or color code to Controls.</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-start gap-2 bg-blue-950/30 p-2 rounded-xl border border-blue-500/20">
+                    <span>1.</span>
+                    <span><strong>Scream commands:</strong> Your phone shows the action sequence. SHOUT each instruction LOUDLY to the squad!</span>
+                  </div>
+                  <div className="flex items-start gap-2 bg-blue-950/30 p-2 rounded-xl border border-blue-500/20">
+                    <span>2.</span>
+                    <span><strong>Speed matters:</strong> Keep the pace moving fast before the 11:59:59 midnight deadline strikes.</span>
+                  </div>
+                  <div className="flex items-start gap-2 bg-blue-950/30 p-2 rounded-xl border border-blue-500/20">
+                    <span>3.</span>
+                    <span><strong>Wait for confirmation:</strong> Once Controls executes the step, shout the next directive!</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Universal Emergency Rule */}
+          <div className="w-full bg-[#1f0a14] border border-rose-500/40 rounded-xl p-3 text-left">
+            <span className="text-[10px] text-rose-400 font-bold uppercase tracking-wider block mb-0.5">
+              🚨 SQUAD CRISIS PROTOCOL:
+            </span>
+            <p className="text-[11px] text-rose-200">
+              When campus Wi-Fi alarms sound, <strong>ALL squad members must hold down the emergency button together for 3 seconds!</strong>
             </p>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-amber-400 font-bold animate-pulse">
-            <span>WAITING FOR HOST TO START GAME...</span>
+          {/* Waiting Status */}
+          <div className="flex items-center gap-2 text-xs text-amber-400 font-black animate-pulse">
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <span>SQUAD CONNECTED • WAITING FOR HOST TO LAUNCH 75s CLOCK</span>
           </div>
 
           <div className="pt-2 border-t border-slate-800/80 w-full">
             <Link
               href="/"
               onClick={() => {
+                sessionStorage.removeItem('panic_player_id');
                 localStorage.removeItem('panic_player_id');
                 localStorage.removeItem('panic_player_name');
               }}
@@ -284,58 +352,6 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
               <Home className="w-3.5 h-3.5" />
               <span>Leave Lobby / Go Home</span>
             </Link>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  // -------------------------------------------------------------
-  // BRIEFING OVERLAY ON PHONE (WAITING FOR HOST TO PROCEED)
-  // -------------------------------------------------------------
-  if (room.phase === 'BRIEFING') {
-    return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#06080d] text-slate-100 font-mono text-center relative overflow-hidden">
-        <div
-          className={`max-w-md w-full rounded-3xl p-8 border-2 shadow-2xl flex flex-col items-center gap-5 ${
-            myPlayer.color === 'yellow'
-              ? 'bg-[#181408] border-yellow-400 glow-yellow'
-              : myPlayer.color === 'purple'
-              ? 'bg-[#160a22] border-purple-400 glow-purple'
-              : 'bg-[#081524] border-cyan-400 glow-blue'
-          }`}
-        >
-          <div className="inline-block px-4 py-1 rounded-full bg-black/60 border border-slate-700 text-[10px] text-amber-300 font-black uppercase tracking-widest">
-            📋 SQUAD MISSION BRIEFING
-          </div>
-
-          <div className="text-4xl animate-bounce">
-            {myPlayer.color === 'yellow' ? '🟡' : myPlayer.color === 'purple' ? '🟣' : '🔵'}
-          </div>
-
-          <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-tight">
-            YOUR ASSIGNED ROLE
-          </h1>
-
-          <div className="bg-black/80 p-5 rounded-2xl border border-slate-700/80 text-left w-full shadow-inner">
-            <span className="text-xs font-black text-amber-400 block mb-1 uppercase tracking-wider">
-              {myPlayer.role === 'CONTROLS'
-                ? '🟡 THE CONTROLS'
-                : myPlayer.role === 'BLUEPRINTS'
-                ? '🟣 THE BLUEPRINTS'
-                : '🔵 THE DIRECTIVES'}
-            </span>
-            <p className="text-sm font-bold text-slate-200 leading-relaxed">
-              {myPlayer.role === 'CONTROLS'
-                ? 'Keep your fingers on the switches & dials. Listen closely to teammates and execute what they shout!'
-                : myPlayer.role === 'BLUEPRINTS'
-                ? 'Decode the schematics on your screen. Warn your crew which buttons are SAFE vs TRAPS!'
-                : 'You see the sequence. Scream the action instructions out loud to your squad!'}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-center gap-2 text-xs text-amber-400 font-black animate-pulse">
-            <span>HOST IS REVIEWING RULES... GET READY TO SHOUT!</span>
           </div>
         </div>
       </main>

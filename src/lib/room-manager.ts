@@ -184,39 +184,25 @@ export function joinPlayer(code: string, playerId: string, name: string): { play
 }
 
 /**
- * Starts the Briefing phase (Rules & Roles Review)
+ * Starts the 75s live gameplay
  */
 export function startGame(code: string) {
   const room = getRoom(code);
-  if (!room || room.phase !== 'LOBBY') return;
+  if (!room || (room.phase !== 'LOBBY' && room.phase !== 'BRIEFING')) return;
 
   const activeCount = Math.min(3, Math.max(2, Object.values(room.players).filter((p) => p.isConnected).length));
   if (activeCount < 2) return;
 
   room.mode = activeCount === 2 ? '2_PLAYER' : '3_PLAYER';
-  room.phase = 'BRIEFING';
+  room.phase = 'ORIENT';
+  room.startTime = Date.now();
+  room.elapsedMs = 0;
   room.uploadPercent = 0;
   room.chaosLevel = 10;
   room.comboCount = 0;
   room.maxCombo = 0;
   room.successfulTasks = 0;
   room.failedTasks = 0;
-  room.spectatorHeadline = 'MISSION BRIEFING: REVIEW SQUAD ROLES & CLICK PROCEED TO LAUNCH!';
-  addSpectatorLog(room, '📋 MISSION BRIEFING: Check your role on your screen & click PROCEED!', 'warning');
-
-  broadcastRoomUpdate(code);
-}
-
-/**
- * Proceeds from Briefing to live 75s gameplay
- */
-export function proceedToGame(code: string) {
-  const room = getRoom(code);
-  if (!room || room.phase !== 'BRIEFING') return;
-
-  room.phase = 'ORIENT';
-  room.startTime = Date.now();
-  room.elapsedMs = 0;
   room.spectatorHeadline = '11:58:45 — 75 SECONDS TO MIDNIGHT! SUBMIT THE PROJECT!';
   addSpectatorLog(room, '🔥 DEADLINE CLOCK ACTIVE! 75 SECONDS TO 11:59:59!', 'danger');
 
@@ -226,6 +212,13 @@ export function proceedToGame(code: string) {
   // Start tick loop
   startRoomTicker(code);
   broadcastRoomUpdate(code);
+}
+
+/**
+ * Proceeds to game (alias of startGame)
+ */
+export function proceedToGame(code: string) {
+  startGame(code);
 }
 
 function replenishTasks(room: GameRoom, difficulty: 'easy' | 'medium' | 'hard', targetCount: number) {

@@ -322,13 +322,14 @@ export function generateVisualPuzzle(difficulty: 'easy' | 'medium' | 'hard'): Ge
  * Creates the Synchronized Co-op Boss Event for Phase 3 (35–55s)
  */
 export function generateCrisisEvent(playerCount: number): CrisisEvent {
+  const count = Math.min(3, Math.max(2, playerCount));
   return {
     id: `crisis_${Date.now()}`,
     title: '🚨 CAMPUS WI-FI FAILURE 🚨',
-    instruction: `ALL ${playerCount} PLAYERS MUST HOLD THE EMERGENCY SYNC BUTTON SIMULTANEOUSLY FOR 3 SECONDS!`,
+    instruction: `ALL ${count} SQUAD MEMBERS MUST HOLD THE EMERGENCY SYNC BUTTON SIMULTANEOUSLY FOR 3 SECONDS!`,
     type: 'SYNC_HOLD',
     requiredHoldMs: 3000,
-    activePlayersNeeded: playerCount,
+    activePlayersNeeded: count,
     playersHolding: [],
     startedAt: Date.now(),
     durationMs: 16000,

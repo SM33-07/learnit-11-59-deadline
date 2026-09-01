@@ -240,30 +240,51 @@ export default function PlayScreen({ params }: { params: Promise<{ code: string 
   }
 
   // -------------------------------------------------------------
-  // 5-SECOND BRIEFING OVERLAY
+  // BRIEFING OVERLAY ON PHONE (WAITING FOR HOST TO PROCEED)
   // -------------------------------------------------------------
   if (room.phase === 'BRIEFING') {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#07090e] text-slate-100 font-mono text-center scanlines animate-in fade-in zoom-in-95">
-        <div className="max-w-md w-full bg-[#121624] border-4 border-amber-400 rounded-3xl p-8 shadow-2xl glow-yellow flex flex-col items-center gap-4">
-          <span className="text-xs text-amber-400 font-bold uppercase tracking-widest">
-            🚨 5-SECOND BRIEFING
-          </span>
-          <h1 className="text-3xl font-black text-white uppercase">GET READY TO SHOUT!</h1>
-          
-          <div className="bg-black/60 p-4 rounded-2xl border border-amber-500/40 text-left w-full">
-            <span className="text-sm font-bold text-amber-300 block mb-1">YOUR JOB:</span>
-            <span className="text-base text-slate-200">
-              {myPlayer.role === 'CONTROLS'
-                ? '🟡 Keep your hands on the buttons. Press what your crew shouts!'
-                : myPlayer.role === 'BLUEPRINTS'
-                ? '🟣 Tell the team which switches are SAFE and which are TRAPS!'
-                : '🔵 Shout the instructions on your screen LOUD AND CLEAR!'}
-            </span>
+      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#06080d] text-slate-100 font-mono text-center relative overflow-hidden">
+        <div
+          className={`max-w-md w-full rounded-3xl p-8 border-2 shadow-2xl flex flex-col items-center gap-5 ${
+            myPlayer.color === 'yellow'
+              ? 'bg-[#181408] border-yellow-400 glow-yellow'
+              : myPlayer.color === 'purple'
+              ? 'bg-[#160a22] border-purple-400 glow-purple'
+              : 'bg-[#081524] border-cyan-400 glow-blue'
+          }`}
+        >
+          <div className="inline-block px-4 py-1 rounded-full bg-black/60 border border-slate-700 text-[10px] text-amber-300 font-black uppercase tracking-widest">
+            📋 SQUAD MISSION BRIEFING
           </div>
 
-          <div className="text-xs text-slate-400 font-bold animate-pulse">
-            CLOCK STARTS IN SECONDS...
+          <div className="text-4xl animate-bounce">
+            {myPlayer.color === 'yellow' ? '🟡' : myPlayer.color === 'purple' ? '🟣' : '🔵'}
+          </div>
+
+          <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-tight">
+            YOUR ASSIGNED ROLE
+          </h1>
+
+          <div className="bg-black/80 p-5 rounded-2xl border border-slate-700/80 text-left w-full shadow-inner">
+            <span className="text-xs font-black text-amber-400 block mb-1 uppercase tracking-wider">
+              {myPlayer.role === 'CONTROLS'
+                ? '🟡 THE CONTROLS'
+                : myPlayer.role === 'BLUEPRINTS'
+                ? '🟣 THE BLUEPRINTS'
+                : '🔵 THE DIRECTIVES'}
+            </span>
+            <p className="text-sm font-bold text-slate-200 leading-relaxed">
+              {myPlayer.role === 'CONTROLS'
+                ? 'Keep your fingers on the switches & dials. Listen closely to teammates and execute what they shout!'
+                : myPlayer.role === 'BLUEPRINTS'
+                ? 'Decode the schematics on your screen. Warn your crew which buttons are SAFE vs TRAPS!'
+                : 'You see the sequence. Scream the action instructions out loud to your squad!'}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-center gap-2 text-xs text-amber-400 font-black animate-pulse">
+            <span>HOST IS REVIEWING RULES... GET READY TO SHOUT!</span>
           </div>
         </div>
       </main>

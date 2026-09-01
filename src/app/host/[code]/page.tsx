@@ -63,6 +63,18 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
     }
   };
 
+  const handleProceed = async () => {
+    try {
+      await fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'PROCEED', code: upperCode }),
+      });
+    } catch (err) {
+      console.error('Error proceeding to game:', err);
+    }
+  };
+
   const handleRestart = async () => {
     try {
       await fetch(`/api/room/${upperCode}/admin`, {
@@ -89,6 +101,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
   const playersList = Object.values(room.players);
   const totalJoined = playersList.length;
   const isLobby = room.phase === 'LOBBY';
+  const isBriefing = room.phase === 'BRIEFING';
 
   return (
     <div className="min-h-screen flex flex-col justify-between bg-[#06080d] text-slate-100 p-4 sm:p-6 relative overflow-x-hidden selection:bg-amber-500 selection:text-black">
@@ -232,7 +245,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
                   >
                     <Play className="w-6 h-6 fill-black" />
                     <span>
-                      {totalJoined === 2 ? '⚡ LAUNCH GAME (2 PLAYERS)' : '⚡ LAUNCH 3-PLAYER PANIC'}
+                      {totalJoined === 2 ? '⚡ REVIEW RULES (2 PLAYERS)' : '⚡ REVIEW RULES (3 PLAYERS)'}
                     </span>
                   </button>
                 ) : (
@@ -244,9 +257,89 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
               </div>
             </div>
           </div>
+        ) : isBriefing ? (
+          // -------------------------------------------------------------
+          // BRIEFING VIEW: INSTRUCTION & RULES BAR WITH PROCEED BUTTON
+          // -------------------------------------------------------------
+          <div className="max-w-4xl w-full arcade-panel rounded-3xl p-8 border-2 border-amber-500 shadow-2xl glow-yellow animate-in fade-in zoom-in-95 duration-150 text-center relative overflow-hidden">
+            {/* Top Hazard Accent Bar */}
+            <div className="absolute top-0 left-0 right-0 h-2 hazard-tape" />
+
+            <div className="inline-block px-4 py-1 rounded-full bg-amber-500/20 border border-amber-500/50 text-amber-300 font-mono text-xs font-black tracking-widest uppercase mb-3 mt-1">
+              📋 SQUAD MISSION BRIEFING
+            </div>
+
+            <h1 className="font-mono text-3xl sm:text-5xl font-black text-white uppercase tracking-tight mb-2">
+              HOW TO SURVIVE 11:59 DEADLINE
+            </h1>
+            <p className="text-slate-300 font-mono text-sm sm:text-base max-w-xl mx-auto mb-8">
+              Portal locks out in 75 seconds. Read your job below and communicate loudly!
+            </p>
+
+            {/* 4 Rules Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left mb-8 max-w-3xl mx-auto font-mono">
+              {/* Rule 1: Directives */}
+              <div className="bg-[#081524]/90 border-2 border-cyan-400 p-4 rounded-2xl shadow-lg glow-blue">
+                <div className="flex items-center gap-2 text-cyan-300 font-black text-sm mb-1 uppercase">
+                  <span>🔵 1. DIRECTIVES (SHOUT!)</span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  You see the sequence. <strong>Scream the commands out loud</strong> to your squad!
+                </p>
+              </div>
+
+              {/* Rule 2: Blueprints */}
+              <div className="bg-[#160a22]/90 border-2 border-purple-400 p-4 rounded-2xl shadow-lg glow-purple">
+                <div className="flex items-center gap-2 text-purple-300 font-black text-sm mb-1 uppercase">
+                  <span>🟣 2. BLUEPRINTS (DECODE!)</span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  You see the schematics. <strong>Warn the squad which buttons are SAFE vs TRAPS!</strong>
+                </p>
+              </div>
+
+              {/* Rule 3: Controls */}
+              <div className="bg-[#181408]/90 border-2 border-yellow-400 p-4 rounded-2xl shadow-lg glow-yellow">
+                <div className="flex items-center gap-2 text-yellow-300 font-black text-sm mb-1 uppercase">
+                  <span>🟡 3. CONTROLS (EXECUTE!)</span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  You have the tactile hardware. <strong>Listen to teammates and press the safe buttons!</strong>
+                </p>
+              </div>
+
+              {/* Rule 4: Boss Crisis */}
+              <div className="bg-[#1f0a14]/90 border-2 border-rose-500 p-4 rounded-2xl shadow-lg glow-red">
+                <div className="flex items-center gap-2 text-rose-300 font-black text-sm mb-1 uppercase">
+                  <span>🚨 4. CAMPUS CRISIS (SYNC!)</span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  When alarms flash, <strong>ALL squad members must HOLD the sync button together for 3s!</strong>
+                </p>
+              </div>
+            </div>
+
+            {/* Big Proceed Action Button */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-xl mx-auto">
+              <button
+                onClick={handleRestart}
+                className="w-full sm:w-auto px-6 py-4 rounded-2xl border-2 border-slate-700 bg-slate-900/80 hover:bg-slate-800 text-slate-300 font-mono text-sm font-bold transition-all"
+              >
+                ← BACK TO LOBBY
+              </button>
+
+              <button
+                onClick={handleProceed}
+                className="tactile-btn flex-1 w-full py-4.5 px-8 bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 hover:from-emerald-400 hover:to-cyan-300 text-black font-mono font-black text-lg rounded-2xl uppercase tracking-wider flex items-center justify-center gap-3 shadow-[0_0_40px_rgba(16,185,129,0.6)] glow-green hover:scale-[1.02] active:scale-95 border-2 border-emerald-200"
+              >
+                <Play className="w-6 h-6 fill-black" />
+                <span>⚡ PROCEED TO DEADLINE (START)</span>
+              </button>
+            </div>
+          </div>
         ) : (
           // -------------------------------------------------------------
-          // LIVE SPECTATOR HUD (BRIEFING, PLAYING, OR RESOLVED)
+          // LIVE SPECTATOR HUD (ACTIVE PLAYING OR RESOLVED)
           // -------------------------------------------------------------
           <HostSpectatorHUD room={room} onRestart={handleRestart} />
         )}

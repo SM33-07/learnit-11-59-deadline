@@ -112,6 +112,21 @@ export function joinPlayer(code: string, playerId: string, name: string): { play
     return { player: room.players[playerId], room };
   }
 
+  // Cap maximum connected players in a squad at 3
+  if (playerIds.length >= 3) {
+    return { 
+      player: {
+        id: playerId,
+        name: name.trim(),
+        role: 'DIRECTIVES',
+        color: 'blue',
+        isConnected: false,
+        lastSeen: Date.now(),
+      },
+      room 
+    };
+  }
+
   // Assign role based on join order
   let role: PlayerRole = 'CONTROLS';
   let color: Player['color'] = 'yellow';
@@ -139,16 +154,16 @@ export function joinPlayer(code: string, playerId: string, name: string): { play
 
   room.players[playerId] = newPlayer;
 
-  // Update mode automatically
-  const totalCount = Object.keys(room.players).length;
+  // Update mode automatically (capped between 2 and 3)
+  const totalCount = Math.min(3, Math.max(2, Object.keys(room.players).length));
   room.mode = totalCount <= 2 ? '2_PLAYER' : '3_PLAYER';
 
   addSpectatorLog(room, `${color === 'yellow' ? '🟡' : color === 'purple' ? '🟣' : '🔵'} ${newPlayer.name} joined as ${role}`, 'info');
 
   if (totalCount === 2) {
-    room.spectatorHeadline = '2 PLAYERS READY! (Host can start now or wait for a 3rd)';
+    room.spectatorHeadline = '2 PLAYERS READY! (Host can start briefing now or wait for Player 3)';
   } else if (totalCount >= 3) {
-    room.spectatorHeadline = '3 PLAYERS READY! READY TO LAUNCH!';
+    room.spectatorHeadline = '3 PLAYERS READY! ALL SQUAD SLOTS FILLED!';
   }
 
   broadcastRoomUpdate(code);
@@ -156,45 +171,48 @@ export function joinPlayer(code: string, playerId: string, name: string): { play
 }
 
 /**
- * Starts the game: 5s Briefing -> Phase 1
+ * Starts the Briefing phase (Rules & Roles Review)
  */
 export function startGame(code: string) {
   const room = getRoom(code);
   if (!room || room.phase !== 'LOBBY') return;
 
-  const playerCount = Object.keys(room.players).length;
-  if (playerCount < 2) return;
+  const activeCount = Math.min(3, Math.max(2, Object.values(room.players).filter((p) => p.isConnected).length));
+  if (activeCount < 2) return;
 
-  room.mode = playerCount === 2 ? '2_PLAYER' : '3_PLAYER';
+  room.mode = activeCount === 2 ? '2_PLAYER' : '3_PLAYER';
   room.phase = 'BRIEFING';
   room.uploadPercent = 0;
-  room.chaosLevel = 15;
+  room.chaosLevel = 10;
   room.comboCount = 0;
   room.maxCombo = 0;
   room.successfulTasks = 0;
   room.failedTasks = 0;
-  room.spectatorHeadline = '5-SECOND BRIEFING: READ YOUR ROLES & PREPARE TO SHOUT!';
-  addSpectatorLog(room, '🚨 BRIEFING STARTED: Review your job on your phone!', 'warning');
+  room.spectatorHeadline = 'MISSION BRIEFING: REVIEW SQUAD ROLES & CLICK PROCEED TO LAUNCH!';
+  addSpectatorLog(room, '📋 MISSION BRIEFING: Check your role on your screen & click PROCEED!', 'warning');
 
   broadcastRoomUpdate(code);
+}
 
-  // 5 seconds briefing timer
-  setTimeout(() => {
-    if (room.phase === 'BRIEFING') {
-      room.phase = 'ORIENT';
-      room.startTime = Date.now();
-      room.elapsedMs = 0;
-      room.spectatorHeadline = '11:58:45 — SUBMIT THE PROJECT BEFORE 11:59:59!';
-      addSpectatorLog(room, '🔥 CLOCK IS TICKING! 75 SECONDS TO MIDNIGHT!', 'danger');
+/**
+ * Proceeds from Briefing to live 75s gameplay
+ */
+export function proceedToGame(code: string) {
+  const room = getRoom(code);
+  if (!room || room.phase !== 'BRIEFING') return;
 
-      // Populate initial tasks & widgets
-      replenishTasks(room, 'easy', 1);
+  room.phase = 'ORIENT';
+  room.startTime = Date.now();
+  room.elapsedMs = 0;
+  room.spectatorHeadline = '11:58:45 — 75 SECONDS TO MIDNIGHT! SUBMIT THE PROJECT!';
+  addSpectatorLog(room, '🔥 DEADLINE CLOCK ACTIVE! 75 SECONDS TO 11:59:59!', 'danger');
 
-      // Start tick loop
-      startRoomTicker(code);
-      broadcastRoomUpdate(code);
-    }
-  }, 5000);
+  // Populate initial tasks & widgets
+  replenishTasks(room, 'easy', 1);
+
+  // Start tick loop
+  startRoomTicker(code);
+  broadcastRoomUpdate(code);
 }
 
 function replenishTasks(room: GameRoom, difficulty: 'easy' | 'medium' | 'hard', targetCount: number) {
@@ -257,9 +275,9 @@ function startRoomTicker(code: string) {
       room.spectatorHeadline = schedule.subtext;
 
       if (room.phase === 'CRISIS' && !room.activeCrisis) {
-        const playerCount = Object.keys(room.players).length;
-        room.activeCrisis = generateCrisisEvent(playerCount);
-        addSpectatorLog(room, '🚨 CRISIS TRIGGERED: ALL PLAYERS HOLD SYNC!', 'danger');
+        const activeCount = Math.min(3, Math.max(2, Object.values(room.players).filter((p) => p.isConnected).length));
+        room.activeCrisis = generateCrisisEvent(activeCount);
+        addSpectatorLog(room, `🚨 CRISIS TRIGGERED: ALL ${activeCount} SQUAD MEMBERS HOLD SYNC!`, 'danger');
       }
     }
 
@@ -355,7 +373,7 @@ export function handlePlayerAction(
       if (!room.activeCrisis.playersHolding.includes(playerId)) {
         room.activeCrisis.playersHolding.push(playerId);
       }
-      const needed = Object.keys(room.players).length;
+      const needed = Math.min(3, Math.max(2, Object.values(room.players).filter((p) => p.isConnected).length));
       if (room.activeCrisis.playersHolding.length >= needed) {
         // All players are holding! Success!
         room.activeCrisis.resolved = true;

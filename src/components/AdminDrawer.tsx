@@ -19,6 +19,12 @@ export function AdminDrawer({ roomCode, hostToken, onCommandTriggered }: AdminDr
   useEffect(() => {
     setMounted(true);
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Avoid triggering when user is actively typing in input, textarea, or select
+      const activeTag = (document.activeElement as HTMLElement)?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') {
+        return;
+      }
+
       if (e.shiftKey && (e.key === 'A' || e.key === 'a')) {
         setIsOpen((prev) => !prev);
       }

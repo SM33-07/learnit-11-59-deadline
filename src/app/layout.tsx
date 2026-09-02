@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Space_Grotesk, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const spaceGrotesk = Space_Grotesk({
   variable: '--font-space-grotesk',
@@ -16,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: '11:59: DEADLINE PANIC | Learnit Club Co-Op Game',
-  description: "3 people. 75 seconds. SAVE THE SUBMISSION. Asymmetric multi-device co-op game for Learnit Club.",
+  description: "3 people. 90 seconds. SAVE THE SUBMISSION. Asymmetric multi-device co-op game for Learnit Club.",
 };
 
 export const viewport = {
@@ -34,7 +35,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} dark`}>
       <body className="min-h-screen bg-[#07090e] text-slate-100 antialiased selection:bg-amber-500 selection:text-black">
-        {children}
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
       </body>
     </html>
   );

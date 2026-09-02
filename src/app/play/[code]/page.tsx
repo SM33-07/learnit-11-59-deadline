@@ -8,7 +8,7 @@ import { MobileControlBoard } from '@/components/MobileControlBoard';
 import { MobileBlueprintCard } from '@/components/MobileBlueprintCard';
 import { MobileDirectiveCard } from '@/components/MobileDirectiveCard';
 import { CrisisOverlay } from '@/components/CrisisOverlay';
-import { ArrowRight, Home, Sparkles, Smartphone, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Home, Sparkles, Smartphone, RotateCcw, AlertTriangle } from 'lucide-react';
 
 interface PlayPageProps {
   params: Promise<{ code: string }>;
@@ -23,6 +23,8 @@ export default function PlayPage({ params }: PlayPageProps) {
   const [name, setName] = useState('');
   const [view, setView] = useState<PlayerRoomView | null>(null);
   const [isJoined, setIsJoined] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   // Initialize player session on mount
@@ -108,7 +110,12 @@ export default function PlayPage({ params }: PlayPageProps) {
   }, [isJoined, upperCode, playerId, sessionToken]);
 
   const joinGame = async (pid: string, playerName: string) => {
+    setIsJoining(true);
+    setErrorMessage(null);
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
       const res = await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -118,25 +125,33 @@ export default function PlayPage({ params }: PlayPageProps) {
           playerId: pid,
           name: playerName,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
       const data = await res.json();
+
       if (data.success) {
         if (data.player?.sessionToken) {
           setSessionToken(data.player.sessionToken);
           sessionStorage.setItem(`panic_token_${upperCode}`, data.player.sessionToken);
         }
+        if (data.view) {
+          setView(data.view);
+        }
         setIsJoined(true);
         localStorage.setItem('panic_player_name', playerName);
-
-        // Fetch initial sanitized projection immediately
-        const stateRes = await fetch(`/api/room/${upperCode}/state?playerId=${pid}`);
-        const stateData = await stateRes.json();
-        if (stateData.view) {
-          setView(stateData.view);
-        }
+      } else {
+        setErrorMessage(data.error || 'Failed to join room. Room may be full (3 max).');
       }
-    } catch (err) {
-      console.error('Join error:', err);
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        setErrorMessage('Connection timed out while joining. Please retry.');
+      } else {
+        setErrorMessage(err.message || 'Connection error');
+      }
+    } finally {
+      setIsJoining(false);
     }
   };
 
@@ -147,7 +162,7 @@ export default function PlayPage({ params }: PlayPageProps) {
   };
 
   const handleControlAction = async (widgetId: string, value: any) => {
-    if (!playerId) return;
+    if (!playerId || !sessionToken) return;
     try {
       const actionId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const res = await fetch(`/api/room/${upperCode}/action`, {
@@ -173,7 +188,7 @@ export default function PlayPage({ params }: PlayPageProps) {
   };
 
   const handleHintRequest = async () => {
-    if (!playerId) return;
+    if (!playerId || !sessionToken) return;
     try {
       const res = await fetch(`/api/room/${upperCode}/action`, {
         method: 'POST',
@@ -195,7 +210,7 @@ export default function PlayPage({ params }: PlayPageProps) {
   };
 
   const handleCrisisHoldStart = async () => {
-    if (!playerId) return;
+    if (!playerId || !sessionToken) return;
     try {
       await fetch(`/api/room/${upperCode}/action`, {
         method: 'POST',
@@ -212,7 +227,7 @@ export default function PlayPage({ params }: PlayPageProps) {
   };
 
   const handleCrisisHoldEnd = async () => {
-    if (!playerId) return;
+    if (!playerId || !sessionToken) return;
     try {
       await fetch(`/api/room/${upperCode}/action`, {
         method: 'POST',
@@ -231,8 +246,8 @@ export default function PlayPage({ params }: PlayPageProps) {
   // Join Screen
   if (!isJoined) {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#07090e] text-slate-100 font-mono text-center select-none touch-none">
-        <div className="max-w-md w-full bg-[#0d131f] border-2 border-amber-500 rounded-3xl p-6 sm:p-8 shadow-2xl glow-yellow flex flex-col items-center gap-6">
+      <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-[#07090e] text-slate-100 font-mono text-center select-none touch-none">
+        <div className="max-w-md w-full bg-[#0d131f] border-2 border-amber-500 rounded-3xl p-6 sm:p-8 shadow-2xl glow-yellow flex flex-col items-center gap-5">
           <div className="flex items-center gap-2 text-amber-400 font-bold text-xs tracking-widest uppercase">
             <Smartphone className="w-4 h-4" />
             <span>SQUAD JOIN • ROOM {upperCode}</span>
@@ -246,6 +261,13 @@ export default function PlayPage({ params }: PlayPageProps) {
             Enter your name to connect to the desk session!
           </p>
 
+          {errorMessage && (
+            <div className="bg-[#1f0a14] border border-rose-500/60 rounded-2xl p-3.5 flex items-start gap-2 text-left w-full">
+              <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
+              <span className="text-xs text-rose-200 leading-snug">{errorMessage}</span>
+            </div>
+          )}
+
           <form onSubmit={handleJoinSubmit} className="w-full flex flex-col gap-4">
             <input
               type="text"
@@ -254,16 +276,34 @@ export default function PlayPage({ params }: PlayPageProps) {
               onChange={(e) => setName(e.target.value)}
               autoFocus
               required
+              disabled={isJoining}
               className="bg-black/60 border border-amber-500/40 rounded-xl px-4 py-3 text-sm text-center text-amber-300 font-bold focus:outline-none focus:border-amber-400"
             />
             <button
               type="submit"
-              className="tactile-btn py-3.5 bg-amber-500 hover:bg-amber-400 text-black font-black text-sm rounded-xl uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg glow-yellow"
+              disabled={isJoining || !name.trim()}
+              className="tactile-btn py-3.5 bg-amber-500 hover:bg-amber-400 text-black font-black text-sm rounded-xl uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg glow-yellow disabled:opacity-50"
             >
-              <span>JOIN CREW</span>
-              <ArrowRight className="w-4 h-4" />
+              {isJoining ? (
+                <span>CONNECTING...</span>
+              ) : (
+                <>
+                  <span>JOIN CREW</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </form>
+
+          <div className="pt-2 border-t border-slate-800 w-full">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-amber-400 font-mono transition-colors"
+            >
+              <Home className="w-3.5 h-3.5" />
+              <span>Back to Home</span>
+            </Link>
+          </div>
         </div>
       </main>
     );
@@ -272,8 +312,15 @@ export default function PlayPage({ params }: PlayPageProps) {
   // Waiting for stream projection
   if (!view) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#07090e] text-amber-400 font-mono text-xs select-none">
-        SYNCING ASYMMETRIC CONTROLS [{upperCode}]...
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#07090e] text-amber-400 font-mono text-xs select-none gap-4">
+        <div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin glow-yellow" />
+        <span>SYNCING ASYMMETRIC CONTROLS [{upperCode}]...</span>
+        <button
+          onClick={() => playerId && joinGame(playerId, name)}
+          className="mt-2 text-[11px] text-slate-400 underline hover:text-amber-300"
+        >
+          Taking long? Tap to resync
+        </button>
       </div>
     );
   }
@@ -383,7 +430,7 @@ export default function PlayPage({ params }: PlayPageProps) {
     const googleFormUrl = 'https://docs.google.com/forms/d/e/1FAIpQLScdpwK6YjFtwWux8XXBr7tJRYrIlJSdsTNbfT3mahZShdCxHQ/viewform';
 
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#06080d] text-slate-100 font-mono text-center select-none touch-none">
+      <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-[#06080d] text-slate-100 font-mono text-center select-none touch-none">
         <div
           className={`max-w-md w-full rounded-3xl p-6 sm:p-8 border-2 shadow-2xl flex flex-col items-center gap-4 ${
             isVictory ? 'bg-[#081812] border-emerald-400 glow-green' : 'bg-[#18080c] border-rose-500 glow-red'

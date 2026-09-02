@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     const roomCode = (code && code.trim() ? code.trim() : generateUniqueRoomCode()).toUpperCase();
 
     if (action === 'CREATE') {
-      const room = getOrCreateRoom(roomCode, playerId || 'host', lanUrl);
+      const room = getOrCreateRoom(roomCode, playerId || 'host', lanUrl, hostToken);
       const lanIp = getLocalLanIp();
       return NextResponse.json({
         success: true,

@@ -47,10 +47,10 @@ export function generateUniqueRoomCode(): string {
   return code;
 }
 
-export function getOrCreateRoom(code: string, hostId: string = 'host', lanUrl?: string): GameRoom {
+export function getOrCreateRoom(code: string, hostId: string = 'host', lanUrl?: string, customHostToken?: string): GameRoom {
   const upperCode = code.toUpperCase();
   if (!globalRooms[upperCode]) {
-    const hostToken = `ht_${crypto.randomUUID()}`;
+    const hostToken = customHostToken || `ht_${crypto.randomUUID()}`;
     globalRooms[upperCode] = {
       code: upperCode,
       hostId,

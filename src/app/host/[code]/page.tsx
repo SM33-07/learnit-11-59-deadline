@@ -7,31 +7,49 @@ import { QRCodeCard } from '@/components/QRCodeCard';
 import { HostSpectatorHUD } from '@/components/HostSpectatorHUD';
 import { AudioController } from '@/components/AudioSynthesizer';
 import { AdminDrawer } from '@/components/AdminDrawer';
-import { Users, Play, ShieldCheck, Flame, Smartphone, Sparkles, Home } from 'lucide-react';
+import { Users, Play, ShieldCheck, Flame, Smartphone, Sparkles, Home, RotateCcw, AlertTriangle } from 'lucide-react';
+import Link from 'next/link';
+
+type HostScreenState = 'BOOTING' | 'READY' | 'ERROR';
 
 export default function HostScreen({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
   const upperCode = code.toUpperCase();
 
+  const [state, setState] = useState<HostScreenState>('BOOTING');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [room, setRoom] = useState<GameRoom | null>(null);
   const [lanIp, setLanIp] = useState<string>('localhost');
   const [hostToken, setHostToken] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
 
-  // Initialize Host Room, HostToken & LAN IP
-  useEffect(() => {
-    let isMounted = true;
+  const initHostRoom = () => {
+    setState('BOOTING');
+    setErrorMessage(null);
+
     const storedToken = typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : null;
 
-    // Ensure room is created / claimed and initial state is returned
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      console.warn(`[HOST_BOOT_TIMEOUT] Room ${upperCode} initialization exceeded 5000ms`);
+      setState('ERROR');
+      setErrorMessage('Mission control connection timed out. Check network or retry.');
+    }, 5000);
+
+    // Initialize or Claim Room State
     fetch('/api/room', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'CREATE', code: upperCode, hostToken: storedToken }),
+      signal: controller.signal,
     })
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
-        if (!isMounted) return;
+        clearTimeout(timeoutId);
         if (data.lanIp) setLanIp(data.lanIp);
         if (data.hostToken) {
           setHostToken(data.hostToken);
@@ -39,18 +57,25 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
         }
         if (data.room) {
           setRoom(data.room);
+          setState('READY');
         }
       })
-      .catch((err) => console.error('Host init error:', err));
+      .catch((err) => {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') return;
+        console.error('[HOST_BOOT_ERROR]', err);
+        setState('ERROR');
+        setErrorMessage(err.message || 'Failed to initialize mission control');
+      });
+  };
 
-    return () => {
-      isMounted = false;
-    };
+  useEffect(() => {
+    initHostRoom();
   }, [upperCode]);
 
   // Connect to real-time Server-Sent Events stream + Polling fallback
   useEffect(() => {
-    if (!hostToken) return;
+    if (!hostToken || state !== 'READY') return;
 
     let eventSource: EventSource | null = null;
     try {
@@ -71,7 +96,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
       console.error('SSE connection error:', err);
     }
 
-    // Polling fallback to keep host synchronized
+    // Polling fallback to ensure continuous synchronization
     const pollInterval = setInterval(() => {
       fetch(`/api/room/${upperCode}/state?playerId=host&hostToken=${hostToken}`)
         .then((res) => res.json())
@@ -87,7 +112,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
       eventSource?.close();
       clearInterval(pollInterval);
     };
-  }, [upperCode, hostToken]);
+  }, [upperCode, hostToken, state]);
 
   const handleStartGame = async () => {
     setIsStarting(true);
@@ -126,17 +151,62 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
     }
   };
 
-  if (!room) {
+  // State 1: Booting Screen
+  if (state === 'BOOTING' || !room) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#06080d] font-mono text-amber-400 select-none">
-        <div className="flex flex-col items-center gap-4">
+      <div className="min-h-screen flex items-center justify-center p-6 bg-[#06080d] font-mono text-amber-400 select-none">
+        <div className="max-w-md w-full bg-[#0b0e17] border-2 border-amber-500 rounded-3xl p-8 shadow-2xl glow-yellow flex flex-col items-center gap-5 text-center">
           <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin glow-yellow" />
-          <span className="text-sm font-black tracking-widest uppercase">INITIALIZING MISSION CONTROL [{upperCode}]...</span>
+          <div>
+            <h2 className="text-base font-black tracking-widest uppercase text-white">
+              INITIALIZING MISSION CONTROL
+            </h2>
+            <span className="text-xs text-amber-400 font-bold block mt-1">ROOM: {upperCode}</span>
+          </div>
+          <span className="text-xs text-slate-400">Connecting booth display to server...</span>
         </div>
       </div>
     );
   }
 
+  // State 2: Error Screen
+  if (state === 'ERROR') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-[#06080d] font-mono text-slate-100 select-none">
+        <div className="max-w-md w-full bg-[#0d131f] border-2 border-rose-500 rounded-3xl p-8 shadow-2xl glow-red flex flex-col items-center gap-5 text-center">
+          <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-2xl">
+            <AlertTriangle className="w-10 h-10 text-rose-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-black tracking-widest uppercase text-white">
+              ROOM INITIALIZATION FAILED
+            </h2>
+            <span className="text-xs text-rose-300 font-bold block mt-1">ROOM: {upperCode}</span>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed">{errorMessage}</p>
+
+          <div className="flex flex-col w-full gap-2.5 pt-2">
+            <button
+              onClick={initHostRoom}
+              className="tactile-btn w-full py-3.5 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 text-black font-black text-xs rounded-xl uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg glow-yellow"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>RETRY CONNECTION</span>
+            </button>
+            <Link
+              href="/"
+              className="flex items-center justify-center gap-2 w-full py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-all"
+            >
+              <Home className="w-3.5 h-3.5" />
+              <span>BACK TO HOME</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // State 3: Ready Game UI
   const playersList = Object.values(room.players);
   const totalJoined = playersList.length;
   const isLobby = room.phase === 'LOBBY';

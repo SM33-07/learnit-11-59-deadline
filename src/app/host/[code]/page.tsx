@@ -7,49 +7,63 @@ import { QRCodeCard } from '@/components/QRCodeCard';
 import { HostSpectatorHUD } from '@/components/HostSpectatorHUD';
 import { AudioController } from '@/components/AudioSynthesizer';
 import { AdminDrawer } from '@/components/AdminDrawer';
-import { Users, Play, ShieldCheck, Flame, Smartphone, Sparkles, Home, RotateCcw, AlertTriangle } from 'lucide-react';
-import Link from 'next/link';
-
-type HostScreenState = 'BOOTING' | 'READY' | 'ERROR';
+import { Users, Play, ShieldCheck, Flame, Smartphone, Sparkles, Home } from 'lucide-react';
 
 export default function HostScreen({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
   const upperCode = code.toUpperCase();
 
-  const [state, setState] = useState<HostScreenState>('BOOTING');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [room, setRoom] = useState<GameRoom | null>(null);
+  // Create immediate default room state so host UI never gets stuck on a loading screen
+  const defaultInitialRoom: GameRoom = {
+    code: upperCode,
+    hostId: 'host',
+    hostToken: (typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : '') || '',
+    mode: '3_PLAYER',
+    phase: 'LOBBY',
+    startTime: null,
+    endTime: null,
+    elapsedMs: 0,
+    players: {},
+    uploadPercent: 0,
+    chaosLevel: 10,
+    comboCount: 0,
+    maxCombo: 0,
+    successfulTasks: 0,
+    failedTasks: 0,
+    activeTasks: [],
+    controlWidgets: [],
+    activeCrisis: null,
+    spectatorLogs: [
+      {
+        id: `log_init_${Date.now()}`,
+        timestamp: Date.now(),
+        text: 'Mission Control ready. Scan QR code to connect!',
+        type: 'info',
+      },
+    ],
+    spectatorHeadline: 'WAITING FOR SQUAD TO SCAN QR...',
+    verdict: null,
+    processedActionIds: new Set<string>(),
+  };
+
+  const [room, setRoom] = useState<GameRoom>(defaultInitialRoom);
   const [lanIp, setLanIp] = useState<string>('localhost');
-  const [hostToken, setHostToken] = useState<string | null>(null);
+  const [hostToken, setHostToken] = useState<string | null>(
+    typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : null
+  );
   const [isStarting, setIsStarting] = useState(false);
 
-  const initHostRoom = () => {
-    setState('BOOTING');
-    setErrorMessage(null);
-
+  // Initialize or Claim Room State on Mount
+  useEffect(() => {
     const storedToken = typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : null;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-      console.warn(`[HOST_BOOT_TIMEOUT] Room ${upperCode} initialization exceeded 5000ms`);
-      setState('ERROR');
-      setErrorMessage('Mission control connection timed out. Check network or retry.');
-    }, 5000);
-
-    // Initialize or Claim Room State
     fetch('/api/room', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'CREATE', code: upperCode, hostToken: storedToken }),
-      signal: controller.signal,
     })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
+      .then((res) => res.json())
       .then((data) => {
-        clearTimeout(timeoutId);
         if (data.lanIp) setLanIp(data.lanIp);
         if (data.hostToken) {
           setHostToken(data.hostToken);
@@ -57,48 +71,44 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
         }
         if (data.room) {
           setRoom(data.room);
-          setState('READY');
         }
       })
       .catch((err) => {
-        clearTimeout(timeoutId);
-        if (err.name === 'AbortError') return;
-        console.error('[HOST_BOOT_ERROR]', err);
-        setState('ERROR');
-        setErrorMessage(err.message || 'Failed to initialize mission control');
+        console.warn('Initial room registration warning:', err);
       });
-  };
-
-  useEffect(() => {
-    initHostRoom();
   }, [upperCode]);
 
   // Connect to real-time Server-Sent Events stream + Polling fallback
   useEffect(() => {
-    if (!hostToken || state !== 'READY') return;
-
     let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource(`/api/room/${upperCode}/stream?playerId=host&hostToken=${hostToken}`);
-      eventSource.onmessage = (event) => {
-        try {
-          const updatedRoom = JSON.parse(event.data) as GameRoom;
-          setRoom(updatedRoom);
-          if (updatedRoom.hostToken) {
-            setHostToken(updatedRoom.hostToken);
-            localStorage.setItem(`panic_host_token_${upperCode}`, updatedRoom.hostToken);
+    const token = hostToken || (typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : null);
+
+    if (token) {
+      try {
+        eventSource = new EventSource(`/api/room/${upperCode}/stream?playerId=host&hostToken=${token}`);
+        eventSource.onmessage = (event) => {
+          try {
+            const updatedRoom = JSON.parse(event.data) as GameRoom;
+            setRoom(updatedRoom);
+            if (updatedRoom.hostToken) {
+              setHostToken(updatedRoom.hostToken);
+              localStorage.setItem(`panic_host_token_${upperCode}`, updatedRoom.hostToken);
+            }
+          } catch (err) {
+            console.error('Error parsing SSE room state:', err);
           }
-        } catch (err) {
-          console.error('Error parsing SSE room state:', err);
-        }
-      };
-    } catch (err) {
-      console.error('SSE connection error:', err);
+        };
+      } catch (err) {
+        console.error('SSE connection error:', err);
+      }
     }
 
     // Polling fallback to ensure continuous synchronization
     const pollInterval = setInterval(() => {
-      fetch(`/api/room/${upperCode}/state?playerId=host&hostToken=${hostToken}`)
+      const currentToken = hostToken || (typeof window !== 'undefined' ? localStorage.getItem(`panic_host_token_${upperCode}`) : null);
+      if (!currentToken) return;
+
+      fetch(`/api/room/${upperCode}/state?playerId=host&hostToken=${currentToken}`)
         .then((res) => res.json())
         .then((data) => {
           if (data.room) {
@@ -112,7 +122,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
       eventSource?.close();
       clearInterval(pollInterval);
     };
-  }, [upperCode, hostToken, state]);
+  }, [upperCode, hostToken]);
 
   const handleStartGame = async () => {
     setIsStarting(true);
@@ -151,63 +161,7 @@ export default function HostScreen({ params }: { params: Promise<{ code: string 
     }
   };
 
-  // State 1: Booting Screen
-  if (state === 'BOOTING' || !room) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-[#06080d] font-mono text-amber-400 select-none">
-        <div className="max-w-md w-full bg-[#0b0e17] border-2 border-amber-500 rounded-3xl p-8 shadow-2xl glow-yellow flex flex-col items-center gap-5 text-center">
-          <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin glow-yellow" />
-          <div>
-            <h2 className="text-base font-black tracking-widest uppercase text-white">
-              INITIALIZING MISSION CONTROL
-            </h2>
-            <span className="text-xs text-amber-400 font-bold block mt-1">ROOM: {upperCode}</span>
-          </div>
-          <span className="text-xs text-slate-400">Connecting booth display to server...</span>
-        </div>
-      </div>
-    );
-  }
-
-  // State 2: Error Screen
-  if (state === 'ERROR') {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-[#06080d] font-mono text-slate-100 select-none">
-        <div className="max-w-md w-full bg-[#0d131f] border-2 border-rose-500 rounded-3xl p-8 shadow-2xl glow-red flex flex-col items-center gap-5 text-center">
-          <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-2xl">
-            <AlertTriangle className="w-10 h-10 text-rose-400" />
-          </div>
-          <div>
-            <h2 className="text-lg font-black tracking-widest uppercase text-white">
-              ROOM INITIALIZATION FAILED
-            </h2>
-            <span className="text-xs text-rose-300 font-bold block mt-1">ROOM: {upperCode}</span>
-          </div>
-          <p className="text-xs text-slate-300 leading-relaxed">{errorMessage}</p>
-
-          <div className="flex flex-col w-full gap-2.5 pt-2">
-            <button
-              onClick={initHostRoom}
-              className="tactile-btn w-full py-3.5 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 text-black font-black text-xs rounded-xl uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg glow-yellow"
-            >
-              <RotateCcw className="w-4 h-4" />
-              <span>RETRY CONNECTION</span>
-            </button>
-            <Link
-              href="/"
-              className="flex items-center justify-center gap-2 w-full py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-all"
-            >
-              <Home className="w-3.5 h-3.5" />
-              <span>BACK TO HOME</span>
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // State 3: Ready Game UI
-  const playersList = Object.values(room.players);
+  const playersList = Object.values(room.players || {});
   const totalJoined = playersList.length;
   const isLobby = room.phase === 'LOBBY';
 
